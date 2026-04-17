@@ -1,8 +1,15 @@
 // API service layer for Mygration.
 // Falls back to a local mock if the backend is unreachable, so the UI can be
 // developed independently of the server during Phase 1.
+//
+// In dev, Vite proxies /api/* to localhost:5000, so the default '/api' works.
+// In production (Railway two-service deploy), set VITE_API_URL at build time
+// to the backend URL, e.g. VITE_API_URL=https://<backend>.up.railway.app
 
-const API_BASE = '/api'
+// Accept either the backend root (e.g. https://foo.up.railway.app) or a value
+// already including /api — append /api if missing so it's idiot-proof.
+const RAW_API = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+const API_BASE = RAW_API.endsWith('/api') ? RAW_API : `${RAW_API}/api`
 
 async function request(path, { method = 'GET', body } = {}) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
