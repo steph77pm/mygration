@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { LocationBucket } from './components/LocationBucket.jsx'
 import { LocationDetail } from './components/LocationDetail.jsx'
 import { LocationFormModal } from './components/LocationFormModal.jsx'
@@ -30,9 +31,33 @@ export default function App() {
   )
 }
 
+/**
+ * Small watcher for navigator.onLine. When offline, we show a banner so
+ * Stephanie knows the data she's seeing came from the service worker cache
+ * and not a live fetch. Not a perfect signal (browser API can be noisy on
+ * some networks) but a useful hint.
+ */
+function useOnlineStatus() {
+  const [online, setOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  )
+  useEffect(() => {
+    const up = () => setOnline(true)
+    const down = () => setOnline(false)
+    window.addEventListener('online', up)
+    window.addEventListener('offline', down)
+    return () => {
+      window.removeEventListener('online', up)
+      window.removeEventListener('offline', down)
+    }
+  }, [])
+  return online
+}
+
 function Dashboard() {
   const { locations, error } = useLocationsStore()
   const isMobile = useIsMobile()
+  const online = useOnlineStatus()
 
   return (
     <div className="app">
@@ -42,6 +67,12 @@ function Dashboard() {
         </h1>
         <p className="app-subtitle">Weather planning for van life</p>
       </header>
+
+      {!online && (
+        <div className="offline-banner" role="status">
+          You’re offline — showing last-known data.
+        </div>
+      )}
 
       {error && <div className="global-error">Failed to load: {error}</div>}
 

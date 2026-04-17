@@ -97,6 +97,20 @@ body {
   color: var(--comfort-bad);
 }
 
+/* Offline indicator — sits between the header and the dashboard when the
+ * browser reports we've lost connectivity. Mild amber so it reads as a
+ * hint, not an error. */
+.offline-banner {
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid var(--watching-tint);
+  color: var(--watching-tint);
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
 /* --- Buckets --- */
 
 .dashboard {
