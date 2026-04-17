@@ -19,6 +19,7 @@ In production on Railway, gunicorn serves this via the Procfile.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -34,6 +35,67 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("mygration")
 
 
+def _init_schema_and_seed(app: Flask) -> None:
+    """Ensure tables exist, and optionally seed starter data on a fresh DB.
+
+    Runs inside an app context at startup. `db.create_all()` is idempotent —
+    safe to call on every boot, and cheap once tables exist.
+
+    If the environment variable SEED_ON_STARTUP is truthy AND the DB has no
+    parent areas yet, import and run the seeder. This lets us bootstrap a
+    fresh Railway Postgres database without needing shell access.
+    """
+    with app.app_context():
+        try:
+            db.create_all()
+            log.info("Schema check complete (db.create_all)")
+        except Exception as e:  # noqa: BLE001 — log and continue; gunicorn will restart
+            log.error("db.create_all failed: %s", e)
+            return
+
+        if os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"):
+            try:
+                count = ParentArea.query.count()
+            except Exception as e:  # noqa: BLE001
+                log.error("Could not check ParentArea count: %s", e)
+                return
+            if count == 0:
+                log.info("SEED_ON_STARTUP set and DB is empty — running seeder")
+                # Import lazily so seed.py isn't required for normal requests.
+                import seed as seeder  # type: ignore
+                try:
+                    # Call the inner body directly so we don't construct a new app.
+                    for area_spec in seeder.SEED_DATA:
+                        existing = ParentArea.query.filter_by(name=area_spec["name"]).first()
+                        if existing:
+                            continue
+                        area = ParentArea(
+                            name=area_spec["name"],
+                            bucket=area_spec["bucket"],
+                            central_lat=area_spec["central_lat"],
+                            central_lng=area_spec["central_lng"],
+                            planning_notes=area_spec.get("planning_notes"),
+                        )
+                        db.session.add(area)
+                        db.session.flush()
+                        for i, child_spec in enumerate(area_spec["children"]):
+                            child = ChildLocation(
+                                parent_area_id=area.id,
+                                name=child_spec["name"],
+                                lat=child_spec["lat"],
+                                lng=child_spec["lng"],
+                                sort_order=i,
+                            )
+                            db.session.add(child)
+                    db.session.commit()
+                    log.info("Seed complete: %d parent areas", ParentArea.query.count())
+                except Exception as e:  # noqa: BLE001
+                    db.session.rollback()
+                    log.error("Seeding failed: %s", e)
+            else:
+                log.info("SEED_ON_STARTUP set but DB already has %d parent areas — skipping", count)
+
+
 def create_app(config: type = Config) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config)
@@ -45,6 +107,8 @@ def create_app(config: type = Config) -> Flask:
     db.init_app(app)
     Migrate(app, db)
     CORS(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)
+
+    _init_schema_and_seed(app)
 
     # --- Routes ---
 
