@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useSelectedChild } from '../hooks/useSelectedChild.jsx'
+import { ComfortBadge } from './ComfortBadge.jsx'
+import { alertTagsFor, humidityLabel } from './LocationCard.jsx'
 
 /**
  * Drill-in detail view for a single child location.
  *
  * Two modes depending on which bucket the row came from:
- *   - live:       current conditions, today stats, astro, next 24h hourly
- *                 (Active + Watching — fed by /weather/detail)
+ *   - live:       current conditions + 10-day table + hourly + astro
+ *                 + comfort breakdown modal. Matches the prototype's
+ *                 `renderLocationDetail` shape.
  *   - historical: pick a month → aggregate digest from the same month last year
- *                 + 4 sample days (Future Planning — fed by /weather/historical)
+ *                 + 4 sample days (Future Planning — fed by /weather/historical).
  *
  * Mode is read from the SelectedChild context; a single modal handles both so
  * open/close animations, scroll-lock, and Escape-to-close stay in one place.
@@ -51,6 +54,13 @@ export function LocationDetail() {
       >
         <header className="detail-header">
           <div>
+            <button
+              type="button"
+              className="btn btn-ghost back-btn"
+              onClick={close}
+            >
+              ← Back to Dashboard
+            </button>
             <h2 className="detail-title">{selectedChild.name}</h2>
             <p className="detail-coords">
               {selectedChild.lat.toFixed(3)}, {selectedChild.lng.toFixed(3)}
@@ -82,13 +92,14 @@ export function LocationDetail() {
 }
 
 // -------------------------------------------------------------------------
-// Live mode (current conditions + hourly + astro)
+// Live mode (comfort header + current + 10-day + hourly + astro)
 // -------------------------------------------------------------------------
 
 function LiveMode({ childId }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [breakdownOpen, setBreakdownOpen] = useState(false)
 
   useEffect(() => {
     if (!childId) return
@@ -114,14 +125,31 @@ function LiveMode({ childId }) {
   if (loading) return <div className="detail-loading">Loading forecast…</div>
   if (error) return <div className="detail-error">Couldn’t load detail: {error}</div>
   if (!detail) return null
-  return <DetailContent detail={detail} />
+  return (
+    <>
+      <DetailContent
+        detail={detail}
+        onOpenBreakdown={() => setBreakdownOpen(true)}
+      />
+      {breakdownOpen && (
+        <ComfortBreakdownModal
+          detail={detail}
+          onClose={() => setBreakdownOpen(false)}
+        />
+      )}
+    </>
+  )
 }
 
-function DetailContent({ detail }) {
+function DetailContent({ detail, onOpenBreakdown }) {
   const current = detail.current || {}
   const today = detail.today || {}
   const astro = detail.astro || {}
   const hourly = Array.isArray(detail.hourly) ? detail.hourly : []
+  const comfort = detail.comfort
+  const alerts = detail.alerts || {}
+  const bugRisk = detail.bug_risk
+  const forecast = Array.isArray(detail.forecast_days) ? detail.forecast_days : []
 
   // Slice hourly to "from now (local) onward, next 24 hours".
   const nowEpoch = detail.location_localtime_epoch || Math.floor(Date.now() / 1000)
@@ -129,58 +157,140 @@ function DetailContent({ detail }) {
     .filter((h) => h.time_epoch >= nowEpoch - 60 * 30) // include current hour
     .slice(0, 24)
 
+  const alertTags = alertTagsFor(alerts, comfort?.composite)
+  const humLabel = current.humidity != null ? humidityLabel(current.humidity) : null
+  const comfortLabel = comfortScoreLabel(comfort?.composite)
+
   return (
     <>
-      <section className="detail-now">
-        <div className="detail-now-main">
-          <span className="detail-temp">{Math.round(current.temp_f)}°</span>
-          <div className="detail-now-meta">
-            <span className="detail-condition">{current.condition}</span>
+      {comfort?.composite != null && (
+        <section className="detail-comfort-row">
+          <button
+            type="button"
+            className="detail-comfort-block"
+            onClick={onOpenBreakdown}
+            title="See how this score was calculated"
+          >
+            <ComfortBadge score={comfort.composite} size={48} />
+            <span className="detail-comfort-label">{comfortLabel}</span>
+            <span className="detail-comfort-hint">ⓘ</span>
+          </button>
+        </section>
+      )}
+
+      <div className="detail-grid">
+        <section className="card detail-card">
+          <div className="card-section-title">Current Conditions</div>
+          <div className="detail-big-temp">
+            {Math.round(current.temp_f)}°
             <span className="detail-feels">
-              feels like {Math.round(current.feels_like_f)}°
+              {' '}
+              / {Math.round(current.feels_like_f)}° feels like
             </span>
           </div>
-        </div>
-        <div className="detail-now-side">
-          <WindBlock
-            speed={current.wind_mph}
-            dir={current.wind_dir}
-            degree={current.wind_degree}
-          />
-        </div>
-      </section>
+          <div className="detail-stats">
+            {current.humidity != null && (
+              <span>
+                💧 Humidity: {Math.round(current.humidity)}%
+                {humLabel && ` (${humLabel})`}
+              </span>
+            )}
+            {current.wind_mph != null && (
+              <span>💨 Wind: {Math.round(current.wind_mph)} mph</span>
+            )}
+            {bugRisk && <BugInd level={bugRisk} />}
+          </div>
+          {(alertTags.length > 0 || alerts?.bug_note) && (
+            <div className="detail-alerts-list">
+              {alertTags.map((t, i) => (
+                <div key={i} className={`alert-tag ${t.cls}`}>
+                  {t.label}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
-      <section className="detail-today-grid">
-        <Stat
-          label="High"
-          value={today.high_f != null ? `${Math.round(today.high_f)}°` : '—'}
-        />
-        <Stat
-          label="Low"
-          value={today.low_f != null ? `${Math.round(today.low_f)}°` : '—'}
-        />
-        <Stat
-          label="Rain chance"
-          value={
-            today.rain_chance_pct != null ? `${today.rain_chance_pct}%` : '—'
-          }
-        />
-        <Stat
-          label="Humidity"
-          value={
-            today.avg_humidity != null ? `${Math.round(today.avg_humidity)}%` : '—'
-          }
-        />
-      </section>
+        <section className="card detail-card">
+          <div className="card-section-title">Today</div>
+          <div className="detail-today-grid">
+            <Stat
+              label="High"
+              value={today.high_f != null ? `${Math.round(today.high_f)}°` : '—'}
+            />
+            <Stat
+              label="Low"
+              value={today.low_f != null ? `${Math.round(today.low_f)}°` : '—'}
+            />
+            <Stat
+              label="Rain chance"
+              value={
+                today.rain_chance_pct != null
+                  ? `${today.rain_chance_pct}%`
+                  : '—'
+              }
+            />
+            <Stat
+              label="Avg humidity"
+              value={
+                today.avg_humidity != null
+                  ? `${Math.round(today.avg_humidity)}%`
+                  : '—'
+              }
+            />
+          </div>
+          <div className="detail-astro">
+            <AstroItem label="Sunrise" value={astro.sunrise} icon="🌅" />
+            <AstroItem label="Sunset" value={astro.sunset} icon="🌇" />
+            <AstroItem label="Moon" value={astro.moon_phase} icon="🌙" />
+          </div>
+        </section>
+      </div>
 
-      <section className="detail-astro">
-        <AstroItem label="Sunrise" value={astro.sunrise} icon="🌅" />
-        <AstroItem label="Sunset" value={astro.sunset} icon="🌇" />
-        <AstroItem label="Moon" value={astro.moon_phase} icon="🌙" />
-      </section>
+      {forecast.length > 0 && (
+        <section className="card detail-card">
+          <div className="card-section-title">10-Day Forecast</div>
+          <div className="table-wrapper">
+            <table className="weekly-table">
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th>Condition</th>
+                  <th>High/Low</th>
+                  <th>Humidity</th>
+                  <th>Rain</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecast.map((d, i) => (
+                  <tr key={d.date || i}>
+                    <td>{shortDay(d.date, i)}</td>
+                    <td>{d.condition || '—'}</td>
+                    <td>
+                      {d.high_f != null ? `${Math.round(d.high_f)}°` : '—'}
+                      {' / '}
+                      {d.low_f != null ? `${Math.round(d.low_f)}°` : '—'}
+                    </td>
+                    <td>
+                      {d.avg_humidity != null
+                        ? `${Math.round(d.avg_humidity)}%`
+                        : '—'}
+                    </td>
+                    <td>
+                      {d.rain_chance_pct != null
+                        ? `${d.rain_chance_pct}%`
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
-      <section className="detail-hourly">
-        <h3 className="detail-section-title">Next 24 hours</h3>
+      <section className="card detail-card detail-hourly-card">
+        <div className="card-section-title">Next 24 hours</div>
         <div className="hourly-strip">
           {upcoming.length === 0 && (
             <div className="hourly-empty">No hourly data available.</div>
@@ -192,6 +302,19 @@ function DetailContent({ detail }) {
       </section>
     </>
   )
+}
+
+/**
+ * Comfort score → short human label. Matches the prototype's labels
+ * ("Great" / "Good" / "Moderate" / "Poor" / "Bad").
+ */
+function comfortScoreLabel(score) {
+  if (score == null) return ''
+  if (score >= 8) return 'Great'
+  if (score >= 7) return 'Good'
+  if (score >= 5) return 'Moderate'
+  if (score >= 3) return 'Poor'
+  return 'Bad'
 }
 
 function Stat({ label, value }) {
@@ -217,38 +340,108 @@ function AstroItem({ label, value, icon }) {
   )
 }
 
-/** Wind with a rotating arrow pointing in the compass direction wind is coming FROM.
- *  WeatherAPI's `wind_degree` is the direction wind is blowing FROM — so we add 180
- *  for an arrow that points where the wind is going TO, which is more intuitive.
- */
-function WindBlock({ speed, dir, degree }) {
-  if (speed == null) return null
-  const rotate = typeof degree === 'number' ? (degree + 180) % 360 : null
+/** Bug indicator chip used in detail-stats. */
+function BugInd({ level, note }) {
+  const label = level.charAt(0).toUpperCase() + level.slice(1)
   return (
-    <div className="wind-block" title={`Wind ${dir || ''} at ${Math.round(speed)} mph`}>
-      {rotate !== null && (
-        <span
-          className="wind-arrow"
-          style={{ transform: `rotate(${rotate}deg)` }}
-          aria-hidden="true"
-        >
-          ↑
-        </span>
-      )}
-      <div className="wind-text">
-        <span className="wind-speed">{Math.round(speed)} mph</span>
-        <span className="wind-dir">{dir || ''}</span>
+    <span className={`bug-ind ${level}`} title={note || ''}>
+      🪲 {label}
+    </span>
+  )
+}
+
+/**
+ * Comfort score breakdown modal. Tap the comfort block to open.
+ * Mirrors the prototype's modal: per-factor subscores + composite + a
+ * paragraph of explanatory text.
+ */
+function ComfortBreakdownModal({ detail, onClose }) {
+  const comfort = detail.comfort || {}
+  const alerts = detail.alerts || {}
+  const bugRisk = detail.bug_risk
+  const composite = comfort.composite
+
+  // Stop Escape from bubbling to the outer detail-close.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <h3 className="modal-title">Comfort Score Breakdown</h3>
+          <button
+            type="button"
+            className="modal-close"
+            onClick={onClose}
+            aria-label="Close breakdown"
+          >
+            ×
+          </button>
+        </div>
+        <BreakdownRow label="Temperature" value={comfort.temperature} />
+        <BreakdownRow
+          label="Humidity (heaviest weight)"
+          value={comfort.humidity}
+        />
+        <BreakdownRow label="Rain" value={comfort.rain} />
+        <BreakdownRow label="Wind" value={comfort.wind} />
+        <BreakdownRow
+          label="Overall score"
+          value={composite}
+          emphasize
+        />
+        <p className="breakdown-note">
+          The comfort score combines humidity, temperature, rain, and wind,
+          weighted by how much each actually affects your day. Humidity has the
+          heaviest influence.
+          {(bugRisk === 'high' || bugRisk === 'severe') && (
+            <> Bug levels are a significant concern right now.</>
+          )}
+          {alerts.extended_heat && <> Extended heat is in the forecast.</>}
+          {alerts.extended_cold && <> Cold nights may require prep.</>}
+        </p>
       </div>
     </div>
   )
 }
 
+function BreakdownRow({ label, value, emphasize }) {
+  const display = value != null ? `${value.toFixed(1)}/10` : '—'
+  return (
+    <div className="breakdown-row">
+      <span className="breakdown-label">{label}</span>
+      <span className={`breakdown-score${emphasize ? ' emphasize' : ''}`}>
+        {display}
+      </span>
+    </div>
+  )
+}
+
+/** "2026-04-19" → "Sun". First row becomes "Today" for clarity. */
+function shortDay(date, idx) {
+  if (idx === 0) return 'Today'
+  if (!date) return ''
+  const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : date
+  if (Number.isNaN(d?.getTime?.())) return String(date).slice(0, 3)
+  return d.toLocaleDateString(undefined, { weekday: 'short' })
+}
+
 /**
  * A single hour in the horizontal strip.
- *
- * Picks an emoji based on WeatherAPI's condition code + is_day — keeps it
- * dependency-free (no icon lib). Stephanie flagged mornings/evenings as the
- * key times, so we always show the hour label prominently.
  */
 function HourCard({ hour }) {
   const label = formatHourLabel(hour.time)
@@ -283,20 +476,13 @@ function formatHourLabel(time) {
   return h < 12 ? `${h} AM` : `${h - 12} PM`
 }
 
-/** Map WeatherAPI condition codes to emoji. Sparse on purpose — we only care
- *  about the broad buckets (clear / cloud / rain / snow / thunder / fog).
- *  Full list at https://www.weatherapi.com/docs/weather_conditions.json.
- */
+/** Map WeatherAPI condition codes to emoji. */
 function conditionEmoji(code, isDay) {
   if (code == null) return ''
-  // Clear / sunny
   if (code === 1000) return isDay ? '☀️' : '🌙'
-  // Partly / overcast
   if ([1003, 1006].includes(code)) return isDay ? '⛅' : '☁️'
   if (code === 1009) return '☁️'
-  // Mist / fog
   if ([1030, 1135, 1147].includes(code)) return '🌫️'
-  // Rain (all the various drizzle/rain/shower codes)
   if (
     [
       1063, 1150, 1153, 1168, 1171, 1180, 1183, 1186, 1189, 1192, 1195, 1240,
@@ -304,9 +490,7 @@ function conditionEmoji(code, isDay) {
     ].includes(code)
   )
     return '🌧️'
-  // Thunder
-  if ([1273, 1276, 1279, 1282, 1087].includes(code)) return '⛈️'
-  // Snow / sleet
+  if ([1273, 1276, 1279, 1282].includes(code)) return '⛈️'
   if (
     [
       1066, 1069, 1114, 1117, 1204, 1207, 1210, 1213, 1216, 1219, 1222, 1225,
@@ -337,7 +521,6 @@ const MONTHS = [
 ]
 
 function HistoricalMode({ child }) {
-  // Default to the current month — likely the most immediately useful pick.
   const [month, setMonth] = useState(() => new Date().getMonth() + 1)
   const [digest, setDigest] = useState(null)
   const [loading, setLoading] = useState(false)

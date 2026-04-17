@@ -49,6 +49,7 @@ export const api = {
   deleteStop: (id) => request(`/stops/${id}`, { method: 'DELETE' }),
   moveStop: (id, direction) =>
     request(`/stops/${id}/move`, { method: 'POST', body: { direction } }),
+  getTripWeather: (id) => request(`/trips/${id}/weather`),
 }
 
 // Mock data — used when the backend isn't running yet. Matches the API

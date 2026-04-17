@@ -1,21 +1,25 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '../api.js'
 import { usePersistedState } from '../hooks/usePersistedState.js'
 import { useTripsStore } from '../hooks/useTripsStore.jsx'
+import { ComfortBadge } from './ComfortBadge.jsx'
 
 /**
- * Trip Planner view — Phase 2 commit #1: CRUD + visual shell, no weather yet.
+ * Trip Planner view — Phase 2 commit #2: CRUD + visual shell + weather
+ * projection.
  *
  * Matches the prototype:
  *   - Section header: title + view toggles (Timeline/List) + compare toggles
  *     (Compare/Single) + "+ New Track"
- *   - Summary strip: one summary per track (stop count, + avg comfort + worst
- *     bug once weather lands in commit #2)
+ *   - Summary strip: one summary per track with stop count, avg comfort, worst
+ *     bug risk, and a "Has warnings" chip if any stop has heat/cold/native alerts.
  *   - Tracks container: compare-mode = side-by-side, single-mode = one wide
- *   - Track panel: header stripe + (Timeline stop cards ∥ List stop rows)
+ *   - Track panel: header stripe + stop rows/cards with comfort badge, temp,
+ *     humidity, bug chip, and alert tags per stop.
  *
- * "Sometimes just one track being mapped out" — that's why Compare/Single is a
- * toggle even before we have multiple trips. Single mode shows the first track
- * full-width; Compare shows up to 3 side-by-side (PROJECT-GUIDE cap).
+ * Weather comes from GET /api/trips/:id/weather (each stop → forecast day if
+ * within the 10-day window, otherwise current conditions). Fetched per visible
+ * trip so switching between Compare/Single doesn't re-pull everything.
  */
 export function TripPlanner() {
   const {
@@ -30,8 +34,6 @@ export function TripPlanner() {
     moveStop,
   } = useTripsStore()
 
-  // View mode toggles persist across sessions so you don't re-configure every
-  // time you open the tab.
   const [viewMode, setViewMode] = usePersistedState('mygration.trip.view', 'timeline')
   const [compareMode, setCompareMode] = usePersistedState(
     'mygration.trip.compare',
@@ -132,11 +134,56 @@ export function TripPlanner() {
 }
 
 /**
- * Top summary strip. Stop count today; avg comfort + worst bug + warning flag
- * plug in when the /api/trips/:id/weather endpoint lands (commit #2).
+ * Hook: fetch /api/trips/:id/weather for one trip. Returns { weather, loading,
+ * error } and re-fetches when the trip's stop composition changes (we key on
+ * stop ids + coords so a rename alone doesn't re-fetch).
+ */
+function useTripWeather(track) {
+  const stopKey = (track.stops || [])
+    .map((s) => `${s.id}:${s.lat}:${s.lng}:${s.start_date || ''}`)
+    .join(',')
+
+  const [state, setState] = useState({
+    weather: null,
+    loading: false,
+    error: null,
+  })
+
+  useEffect(() => {
+    // No stops → no fetch, clear state.
+    if (!track.id || (track.stops || []).length === 0) {
+      setState({ weather: null, loading: false, error: null })
+      return
+    }
+    let cancelled = false
+    setState((s) => ({ ...s, loading: true, error: null }))
+    api
+      .getTripWeather(track.id)
+      .then((data) => {
+        if (!cancelled) setState({ weather: data, loading: false, error: null })
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setState({ weather: null, loading: false, error: e.message })
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track.id, stopKey])
+
+  return state
+}
+
+/**
+ * Top summary strip. Shows stop count + avg comfort + worst bug + warnings
+ * flag using the trip weather data.
  */
 function TrackSummary({ track }) {
   const stopCount = (track.stops || []).length
+  const { weather } = useTripWeather(track)
+  const summary = weather?.summary
+
   return (
     <div className="track-summary" style={{ borderTopColor: track.color }}>
       <div className="summary-name">{track.name}</div>
@@ -144,9 +191,17 @@ function TrackSummary({ track }) {
         <span>
           {stopCount} stop{stopCount === 1 ? '' : 's'}
         </span>
-        <span className="summary-pending" title="Weather projection arrives in the next update">
-          Weather projection: soon
-        </span>
+        {summary?.avg_comfort != null && (
+          <span>
+            Avg comfort: <strong>{summary.avg_comfort}/10</strong>
+          </span>
+        )}
+        {summary?.worst_bug && <BugInd level={summary.worst_bug} />}
+        {summary?.has_warnings && (
+          <span className="alert-tag severe" style={{ fontSize: 10 }}>
+            Has warnings
+          </span>
+        )}
       </div>
     </div>
   )
@@ -163,6 +218,13 @@ function TrackPanel({
   onMoveStop,
 }) {
   const stops = track.stops || []
+  const { weather, loading, error } = useTripWeather(track)
+
+  // Build a stop_id → weather entry lookup so render is O(1) per stop.
+  const weatherByStop = {}
+  for (const w of weather?.stops || []) {
+    weatherByStop[w.stop_id] = w
+  }
 
   return (
     <div className="track-panel">
@@ -193,6 +255,15 @@ function TrackPanel({
         </div>
       </div>
 
+      {loading && stops.length > 0 && (
+        <div className="track-weather-loading">Loading weather…</div>
+      )}
+      {error && (
+        <div className="track-weather-error" title={error}>
+          Weather unavailable
+        </div>
+      )}
+
       {stops.length === 0 ? (
         <div className="track-empty">
           No stops yet.{' '}
@@ -206,6 +277,7 @@ function TrackPanel({
             <div key={s.id}>
               <StopTimelineCard
                 stop={s}
+                weather={weatherByStop[s.id]}
                 trackColor={track.color}
                 isFirst={i === 0}
                 isLast={i === stops.length - 1}
@@ -227,6 +299,7 @@ function TrackPanel({
             <StopListRow
               key={s.id}
               stop={s}
+              weather={weatherByStop[s.id]}
               trackColor={track.color}
               isFirst={i === 0}
               isLast={i === stops.length - 1}
@@ -247,6 +320,7 @@ function TrackPanel({
 
 function StopTimelineCard({
   stop,
+  weather,
   trackColor,
   isFirst,
   isLast,
@@ -255,6 +329,12 @@ function StopTimelineCard({
   onMoveUp,
   onMoveDown,
 }) {
+  const comfortScore = weather?.comfort?.composite
+  const tempLabel = weather?.temp_f != null ? `${Math.round(weather.temp_f)}°F` : null
+  const humidityLabel =
+    weather?.humidity != null ? `${Math.round(weather.humidity)}% humidity` : null
+  const alertTags = buildAlertTags(weather)
+
   return (
     <div className="stop-card" style={{ borderLeftColor: trackColor }}>
       <div className="stop-header">
@@ -262,6 +342,7 @@ function StopTimelineCard({
           <span>📍</span>
           <span className="stop-name">{stop.name}</span>
         </div>
+        {comfortScore != null && <ComfortBadge score={comfortScore} size={28} />}
         <StopRowActions
           isFirst={isFirst}
           isLast={isLast}
@@ -271,19 +352,49 @@ function StopTimelineCard({
           onMoveDown={onMoveDown}
         />
       </div>
-      <div className="stop-dates">📅 {formatDateRange(stop.start_date, stop.end_date)}</div>
+      <div className="stop-dates">
+        📅 {formatDateRange(stop.start_date, stop.end_date)}
+        {weather?.mode === 'current' && (
+          <span className="stop-mode-hint"> · current conditions</span>
+        )}
+        {weather?.mode === 'forecast' && (
+          <span className="stop-mode-hint"> · forecast</span>
+        )}
+      </div>
       {stop.planning_notes && (
         <div className="stop-notes">{stop.planning_notes}</div>
       )}
       <div className="stop-details">
-        <span className="stop-stat">Weather projection pending</span>
+        {tempLabel ? (
+          <span className="stop-stat">{tempLabel}</span>
+        ) : weather?.mode === 'error' ? (
+          <span className="stop-stat" style={{ color: '#64748b' }}>
+            Weather unavailable
+          </span>
+        ) : (
+          <span className="stop-stat" style={{ color: '#64748b' }}>
+            —
+          </span>
+        )}
+        {humidityLabel && <span className="stop-stat">{humidityLabel}</span>}
+        {weather?.bug_risk && <BugInd level={weather.bug_risk} />}
       </div>
+      {alertTags.length > 0 && (
+        <div className="stop-alerts">
+          {alertTags.map((t, i) => (
+            <span key={i} className={`alert-tag ${t.cls}`}>
+              {t.label}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 function StopListRow({
   stop,
+  weather,
   trackColor,
   isFirst,
   isLast,
@@ -292,8 +403,13 @@ function StopListRow({
   onMoveUp,
   onMoveDown,
 }) {
+  const comfortScore = weather?.comfort?.composite
+  const tempLabel = weather?.temp_f != null ? `${Math.round(weather.temp_f)}°F` : null
+  const alertTags = buildAlertTags(weather)
+
   return (
     <div className="list-stop-row">
+      <div className="list-stop-grip" aria-hidden="true">≡</div>
       <div className="list-stop-dot" style={{ background: trackColor }} />
       <div className="list-stop-info">
         <div className="list-stop-name">{stop.name}</div>
@@ -302,7 +418,20 @@ function StopListRow({
         </div>
       </div>
       <div className="list-stop-weather">
-        <span style={{ color: '#64748b', fontStyle: 'italic' }}>—</span>
+        {tempLabel ? (
+          <span>{tempLabel}</span>
+        ) : (
+          <span style={{ color: '#64748b' }}>—</span>
+        )}
+        {comfortScore != null && <ComfortBadge score={comfortScore} size={28} />}
+      </div>
+      <div className="list-stop-flags">
+        {weather?.bug_risk && <BugInd level={weather.bug_risk} />}
+        {alertTags.map((t, i) => (
+          <span key={i} className={`alert-tag ${t.cls}`}>
+            {t.label}
+          </span>
+        ))}
       </div>
       <StopRowActions
         isFirst={isFirst}
@@ -359,6 +488,40 @@ function StopRowActions({ isFirst, isLast, onEdit, onDelete, onMoveUp, onMoveDow
       </button>
     </div>
   )
+}
+
+/** Bug indicator chip. Same look as the dashboard card version. */
+function BugInd({ level }) {
+  if (!level) return null
+  const label = level.charAt(0).toUpperCase() + level.slice(1)
+  return (
+    <span className={`bug-ind ${level}`}>
+      🪲 {label}
+    </span>
+  )
+}
+
+/**
+ * Build alert-tag objects for a stop from its weather payload. Mirrors
+ * alertTagsFor() in LocationCard.jsx but only surfaces the ones relevant at
+ * the stop level (heat, cold, native). Skip the "Looking good" tag — too
+ * noisy on the stop cards.
+ */
+function buildAlertTags(weather) {
+  const out = []
+  const a = weather?.alerts
+  if (!a) return out
+  if (a.extended_heat) {
+    out.push({ cls: 'heat', label: `🔥 Heat ${a.extended_heat_days}+ days` })
+  }
+  if (a.extended_cold) {
+    out.push({ cls: 'cold', label: `❄️ Cold nights ${a.extended_cold_days}+ days` })
+  }
+  for (const n of a.native || []) {
+    const label = n.event || n.headline || 'Weather alert'
+    out.push({ cls: 'severe', label: `⚠️ ${label}` })
+  }
+  return out
 }
 
 /**

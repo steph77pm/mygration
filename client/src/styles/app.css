@@ -931,3 +931,248 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
 }
+
+/* Trip planner weather projection state messages and list-view grip. */
+.track-weather-loading,
+.track-weather-error {
+  font-size: 12px;
+  color: #64748b;
+  font-style: italic;
+  padding: 4px 0 8px;
+}
+.track-weather-error { color: var(--comfort-bad); }
+
+.list-stop-grip {
+  color: #475569;
+  font-size: 14px;
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.stop-mode-hint { color: #64748b; font-style: italic; }
+
+/* ---------- Detail drill-in: prototype visual parity ---------- */
+/* Ported from prototype/index.html so the live detail modal matches the
+   prototype: back button, comfort block in the header, two-column card grid
+   (current conditions + today), 10-day weekly table, comfort-breakdown modal. */
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.detail-comfort-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -8px;
+  margin-bottom: 4px;
+}
+.detail-comfort-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.detail-comfort-block:hover {
+  background: var(--surface-deep);
+  border-color: var(--border);
+}
+.detail-comfort-label {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+.detail-comfort-hint {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.detail-card {
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.detail-hourly-card { grid-column: 1 / -1; }
+
+.card-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 8px;
+}
+
+/* Override the old .detail-feels (used by the previous detail layout). In the
+   new layout it's inline next to .detail-big-temp and should look like a soft
+   "/ 72° feels like" addendum. */
+.detail-big-temp {
+  font-size: 40px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 12px;
+  line-height: 1;
+}
+.detail-big-temp .detail-feels {
+  font-size: 16px;
+  font-weight: 400;
+  color: #64748b;
+}
+
+.detail-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+.detail-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #334155;
+}
+.detail-alerts-list .alert-tag {
+  display: block;
+  padding: 6px 10px;
+  margin: 0;
+}
+
+.weekly-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.weekly-table th {
+  text-align: left;
+  padding: 8px;
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #334155;
+  font-weight: 600;
+}
+.weekly-table td {
+  padding: 8px;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+  vertical-align: middle;
+}
+.weekly-table tr:last-child td { border-bottom: none; }
+
+/* Comfort-breakdown modal (tap the comfort block to open). Layered above the
+   detail panel via z-index. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: detail-fade 0.12s ease-out;
+}
+.modal-content {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: detail-slide 0.18s ease-out;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.modal-close:hover { color: #e2e8f0; }
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #334155;
+}
+.breakdown-row:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.breakdown-label {
+  font-size: 14px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+.breakdown-score {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+.breakdown-score.emphasize {
+  font-size: 20px;
+  color: var(--accent-soft);
+}
+.breakdown-note {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 16px;
+  line-height: 1.6;
+  padding-top: 16px;
+  border-top: 1px solid #334155;
+}
+
+@media (max-width: 767px) {
+  .detail-grid { grid-template-columns: 1fr; }
+  .modal-content { width: 94%; padding: 18px; }
+}
