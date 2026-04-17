@@ -1,39 +1,43 @@
 /* Mygration — dashboard styles
  *
- * Keeping this simple and readable for Phase 1. The prototype uses a warmer,
- * earth-toned palette that suits a van-life / nature app — we carry that here.
- * When the real visual design lands we can promote this to CSS modules or
- * a proper theming system.
+ * Slate/navy dark palette matching the clickable prototype. The van-life warm
+ * palette we started with made buckets harder to scan at a glance; the dark
+ * theme surfaces the colored comfort/bug chips far better.
  */
 
 :root {
-  /* Palette — pulled from the prototype */
-  --bg: #f8f6f2;
-  --surface: #ffffff;
-  --surface-soft: #f0ebe3;
-  --ink: #2a2a2a;
-  --ink-soft: #6b6b6b;
-  --accent: #2d5a3d; /* forest green — app primary */
-  --accent-soft: #5c8a6e;
-  --border: #e1dcd0;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  /* Palette — slate-900/800/700 from the prototype */
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-soft: #283449;      /* slightly lighter than surface for hover/header states */
+  --surface-deep: #0b1220;      /* inner nested surface (parent-body, rows) */
+  --ink: #f1f5f9;
+  --ink-soft: #94a3b8;          /* secondary text — notes, meta, labels */
+  --ink-muted: #64748b;         /* tertiary text — coordinates, timestamps */
+  --accent: #3b82f6;            /* blue — primary */
+  --accent-soft: #60a5fa;
+  --border: #334155;
+  --border-soft: #1e293b;       /* subtler dividers inside cards */
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
 
-  /* Bucket tints */
-  --active-tint: #2d5a3d;
-  --watching-tint: #8a6d3b;
-  --future-tint: #5a6b7b;
+  /* Bucket tints — distinct enough to scan, tuned for dark bg */
+  --active-tint: #4ade80;       /* bright green — you're here now */
+  --watching-tint: #fbbf24;     /* amber — pivot-ready */
+  --future-tint: #94a3b8;       /* slate — later */
 
-  /* Comfort tiers */
-  --comfort-great: #2d7a4d;
-  --comfort-ok: #9db34a;
-  --comfort-rough: #d18b3a;
-  --comfort-bad: #c74b3c;
+  /* Comfort tiers — saturated colors pop on dark */
+  --comfort-great: #22c55e;
+  --comfort-ok: #84cc16;
+  --comfort-rough: #f59e0b;
+  --comfort-bad: #ef4444;
 
   /* Bug risk */
-  --bug-low: #7ba05b;
-  --bug-moderate: #d1a63a;
-  --bug-high: #d18b3a;
-  --bug-severe: #c74b3c;
+  --bug-low: #22c55e;
+  --bug-moderate: #fbbf24;
+  --bug-high: #f97316;
+  --bug-severe: #ef4444;
+
+  color-scheme: dark;
 }
 
 * {
@@ -260,7 +264,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  background: var(--surface-soft);
+  background: var(--surface-deep);
 }
 
 .empty-children {
