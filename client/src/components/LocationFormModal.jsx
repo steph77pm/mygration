@@ -65,6 +65,12 @@ function FormBody({ modalState, onClose, onSaved }) {
   const { mode } = modalState
   const isParent = mode === 'add-parent' || mode === 'edit-parent'
   const isEdit = mode === 'edit-parent' || mode === 'edit-child'
+  // Seasonal note is only meaningful for children whose parent is in the
+  // Watching bucket (it's the single user-facing line on a .watching-card).
+  // Parent bucket is passed through modalState by the opener.
+  const isWatchingChild =
+    (mode === 'add-child' || mode === 'edit-child') &&
+    modalState.parentBucket === 'watching'
 
   // Seed form state from the item we're editing, if any.
   const seed = (() => {
@@ -81,6 +87,7 @@ function FormBody({ modalState, onClose, onSaved }) {
       return {
         name: modalState.child.name || '',
         planning_notes: modalState.child.planning_notes || '',
+        seasonal_note: modalState.child.seasonal_note || '',
         lat: modalState.child.lat ?? '',
         lng: modalState.child.lng ?? '',
       }
@@ -88,7 +95,7 @@ function FormBody({ modalState, onClose, onSaved }) {
     if (mode === 'add-parent') {
       return { name: '', bucket: modalState.bucket || 'active', planning_notes: '', lat: '', lng: '' }
     }
-    return { name: '', planning_notes: '', lat: '', lng: '' }
+    return { name: '', planning_notes: '', seasonal_note: '', lat: '', lng: '' }
   })()
 
   const [form, setForm] = useState(seed)
@@ -151,6 +158,7 @@ function FormBody({ modalState, onClose, onSaved }) {
           lat,
           lng,
           planning_notes: form.planning_notes || null,
+          seasonal_note: isWatchingChild ? form.seasonal_note || null : null,
         })
       } else if (mode === 'edit-child') {
         await api.updateChild(modalState.child.id, {
@@ -158,6 +166,7 @@ function FormBody({ modalState, onClose, onSaved }) {
           lat,
           lng,
           planning_notes: form.planning_notes || null,
+          seasonal_note: isWatchingChild ? form.seasonal_note || null : null,
         })
       }
       await onSaved()
@@ -237,13 +246,19 @@ function FormBody({ modalState, onClose, onSaved }) {
           }
         />
       </label>
-      {/* TODO: Watching-bucket seasonal_note field — prototype shows a
-          seasonal note on .watching-card, e.g. "Summer (Jul-Aug): Highs 60-70°F,
-          cool and foggy. Best birding mid-July for puffins." We render
-          child.seasonal_note || planning_notes || fallback in LocationCard,
-          but the form doesn't yet expose a dedicated seasonal_note textarea.
-          Add one (conditional on the parent's bucket === 'watching') once the
-          backend/schema gains the field. */}
+      {isWatchingChild && (
+        <label className="form-field">
+          <span className="form-label">
+            Seasonal note <span className="form-hint">(shown on the Watching card)</span>
+          </span>
+          <textarea
+            value={form.seasonal_note || ''}
+            onChange={set('seasonal_note')}
+            rows={3}
+            placeholder='e.g., "Summer (Jul-Aug): Highs 60-70°F, cool and foggy. Best birding mid-July for puffins."'
+          />
+        </label>
+      )}
 
       {error && <div className="form-error">{error}</div>}
 

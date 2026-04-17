@@ -47,6 +47,28 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("mygration")
 
 
+def _ensure_column(table: str, column: str, ddl_type: str) -> None:
+    """Add a column to an existing table if it doesn't exist yet.
+
+    Handles both Postgres (production) and SQLite (local dev). Postgres
+    understands `ADD COLUMN IF NOT EXISTS`; SQLite doesn't, but the inspector
+    introspection we use works there too.
+
+    Cheap + idempotent — safe to call on every boot.
+    """
+    from sqlalchemy import inspect  # local import to avoid polluting the top
+    try:
+        insp = inspect(db.engine)
+        existing = {c["name"] for c in insp.get_columns(table)}
+        if column in existing:
+            return
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql(f'ALTER TABLE {table} ADD COLUMN {column} {ddl_type}')
+        log.info("Added column %s.%s (%s)", table, column, ddl_type)
+    except Exception as e:  # noqa: BLE001
+        log.warning("_ensure_column(%s, %s) failed: %s", table, column, e)
+
+
 def _init_schema_and_seed(app: Flask) -> None:
     """Ensure tables exist, and optionally seed starter data on a fresh DB.
 
@@ -64,6 +86,16 @@ def _init_schema_and_seed(app: Flask) -> None:
         except Exception as e:  # noqa: BLE001 — log and continue; gunicorn will restart
             log.error("db.create_all failed: %s", e)
             return
+
+        # Lightweight additive migrations. `db.create_all()` does not add columns
+        # to existing tables, so we apply new-column ALTERs idempotently here.
+        # Keep this list tiny — for anything schema-shaped (FKs, constraints,
+        # data backfills) use a proper Alembic migration instead.
+        _ensure_column(
+            table="child_locations",
+            column="seasonal_note",
+            ddl_type="TEXT",
+        )
 
         if os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"):
             try:
@@ -214,6 +246,7 @@ def create_app(config: type = Config) -> Flask:
             lng=float(data["lng"]),
             address=data.get("address"),
             planning_notes=data.get("planning_notes"),
+            seasonal_note=data.get("seasonal_note"),
         )
         db.session.add(child)
         db.session.commit()
@@ -231,6 +264,7 @@ def create_app(config: type = Config) -> Flask:
             "star_rating",
             "planning_notes",
             "post_visit_notes",
+            "seasonal_note",
             "sort_order",
         ):
             if field in data:

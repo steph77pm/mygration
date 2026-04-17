@@ -40,11 +40,11 @@ export function LocationsStoreProvider({ children }) {
   const openEditParent = useCallback((area) => {
     setModalState({ mode: 'edit-parent', area })
   }, [])
-  const openAddChild = useCallback((parentId, parentName) => {
-    setModalState({ mode: 'add-child', parentId, parentName })
+  const openAddChild = useCallback((parentId, parentName, parentBucket) => {
+    setModalState({ mode: 'add-child', parentId, parentName, parentBucket })
   }, [])
-  const openEditChild = useCallback((child, parentName) => {
-    setModalState({ mode: 'edit-child', child, parentName })
+  const openEditChild = useCallback((child, parentName, parentBucket) => {
+    setModalState({ mode: 'edit-child', child, parentName, parentBucket })
   }, [])
   const closeModal = useCallback(() => setModalState(null), [])
 

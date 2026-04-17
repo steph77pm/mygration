@@ -112,6 +112,10 @@ class ChildLocation(db.Model):
     star_rating = db.Column(db.Integer, nullable=True)  # 1-5, nullable = not yet rated
     planning_notes = db.Column(db.Text, nullable=True)
     post_visit_notes = db.Column(db.Text, nullable=True)
+    # Displayed on Watching cards ("Summer (Jul-Aug): Highs 60-70°F, best mid-July
+    # for puffins"). Only surfaced in the form when the parent is in the Watching
+    # bucket, but the column lives on every child for schema simplicity.
+    seasonal_note = db.Column(db.Text, nullable=True)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
@@ -132,6 +136,7 @@ class ChildLocation(db.Model):
             "star_rating": self.star_rating,
             "planning_notes": self.planning_notes,
             "post_visit_notes": self.post_visit_notes,
+            "seasonal_note": self.seasonal_note,
             "sort_order": self.sort_order,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

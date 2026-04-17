@@ -51,7 +51,7 @@ export function LocationCard({ child, parentName, mode = 'live' }) {
       <button
         type="button"
         className="icon-btn"
-        onClick={stop(() => openEditChild(child, parentName))}
+        onClick={stop(() => openEditChild(child, parentName, child._parentArea?.bucket))}
         aria-label={`Edit ${child.name}`}
         title="Edit spot"
       >
