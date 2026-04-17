@@ -37,6 +37,18 @@ export const api = {
   getChildHistorical: (id, month) =>
     request(`/children/${id}/weather/historical?month=${encodeURIComponent(month)}`),
   searchPlaces: (q) => request(`/geocode/search?q=${encodeURIComponent(q)}`),
+
+  // --- Trip Planner (Phase 2) ---
+  listTrips: () => request('/trips'),
+  createTrip: (data) => request('/trips', { method: 'POST', body: data }),
+  updateTrip: (id, data) => request(`/trips/${id}`, { method: 'PATCH', body: data }),
+  deleteTrip: (id) => request(`/trips/${id}`, { method: 'DELETE' }),
+  createStop: (tripId, data) =>
+    request(`/trips/${tripId}/stops`, { method: 'POST', body: data }),
+  updateStop: (id, data) => request(`/stops/${id}`, { method: 'PATCH', body: data }),
+  deleteStop: (id) => request(`/stops/${id}`, { method: 'DELETE' }),
+  moveStop: (id, direction) =>
+    request(`/stops/${id}/move`, { method: 'POST', body: { direction } }),
 }
 
 // Mock data — used when the backend isn't running yet. Matches the API

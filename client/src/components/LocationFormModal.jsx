@@ -277,8 +277,10 @@ function FormBody({ modalState, onClose, onSaved }) {
 /**
  * Debounced search-as-you-type. Hits /api/geocode/search (WeatherAPI proxy).
  * On pick: passes { name, lat, lon } back to the form.
+ *
+ * Exported so the Trip Planner stop-form can reuse the same UX.
  */
-function LocationPicker({ onPick }) {
+export function LocationPicker({ onPick }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)

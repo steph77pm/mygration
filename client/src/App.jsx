@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import { LocationBucket } from './components/LocationBucket.jsx'
 import { LocationDetail } from './components/LocationDetail.jsx'
 import { LocationFormModal } from './components/LocationFormModal.jsx'
+import { TripFormModal } from './components/TripFormModal.jsx'
+import { TripPlanner } from './components/TripPlanner.jsx'
 import { LocationsStoreProvider, useLocationsStore } from './hooks/useLocationsStore.jsx'
 import { SelectedChildProvider } from './hooks/useSelectedChild.jsx'
+import { TripsStoreProvider } from './hooks/useTripsStore.jsx'
 
 /**
  * Mygration app shell.
@@ -14,16 +17,20 @@ import { SelectedChildProvider } from './hooks/useSelectedChild.jsx'
  *
  * Views:
  *   - dashboard    → three always-visible buckets (Active / Watching / Future)
- *   - tripPlanner  → placeholder card until Phase 2 lands
+ *   - tripPlanner  → real Trip Planner (Phase 2 commit #1: CRUD + visual,
+ *                    weather projection follows in commit #2)
  */
 export default function App() {
   return (
     <LocationsStoreProvider>
-      <SelectedChildProvider>
-        <AppShell />
-        <LocationDetail />
-        <LocationFormModal />
-      </SelectedChildProvider>
+      <TripsStoreProvider>
+        <SelectedChildProvider>
+          <AppShell />
+          <LocationDetail />
+          <LocationFormModal />
+          <TripFormModal />
+        </SelectedChildProvider>
+      </TripsStoreProvider>
     </LocationsStoreProvider>
   )
 }
@@ -63,7 +70,7 @@ function AppShell() {
       )}
 
       <main className="app-main">
-        {view === 'dashboard' ? <Dashboard /> : <TripPlannerPlaceholder />}
+        {view === 'dashboard' ? <Dashboard /> : <TripPlanner />}
       </main>
     </div>
   )
@@ -96,20 +103,6 @@ function Dashboard() {
         title="Future Planning"
         areas={locations.future_planning || []}
       />
-    </div>
-  )
-}
-
-/** Placeholder content for the Trip Planner tab until Phase 2 ships. */
-function TripPlannerPlaceholder() {
-  return (
-    <div className="trip-planner-placeholder">
-      <div className="card">
-        <h2 className="section-title" style={{ marginBottom: 8 }}>
-          Trip planner
-        </h2>
-        <p className="section-sub">Coming soon.</p>
-      </div>
     </div>
   )
 }

@@ -176,6 +176,110 @@ class WeatherCache(db.Model):
     )
 
 
+class TripPlan(db.Model):
+    """A planned multi-stop route (a 'track' in the UI).
+
+    Trip Planner compares up to 3 TripPlans side-by-side. Each track owns an
+    ordered list of TripStops (the places along the route, with date ranges).
+    """
+
+    __tablename__ = "trip_plans"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    # CSS-compatible color string used for the left-border stripe and summary-
+    # card top-border. Stored as provided so we can round-trip hex, names, or
+    # CSS custom properties without the backend policing format.
+    color = db.Column(db.String(32), nullable=False, default="#3b82f6")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    stops = db.relationship(
+        "TripStop",
+        back_populates="trip_plan",
+        cascade="all, delete-orphan",
+        order_by="TripStop.sort_order",
+    )
+
+    def to_dict(self, include_stops: bool = True) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "color": self.color,
+            "sort_order": self.sort_order,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "stops": [s.to_dict() for s in self.stops] if include_stops else None,
+        }
+
+
+class TripStop(db.Model):
+    """A stop along a TripPlan — a place with an optional date range.
+
+    Stops are free-form: Stephanie's travel plans regularly include places she
+    hasn't added to her library yet ("stop in Knoxville on the way"). Lat/lng
+    are required so the weather projection has something to fetch against. If
+    the stop *is* a place she tracks, `child_location_id` links it back so we
+    can promote cleanly later.
+
+    Dates are optional — "sometime in May" is valid planning, and a stop with
+    no date range simply shows no weather projection.
+    """
+
+    __tablename__ = "trip_stops"
+
+    id = db.Column(db.Integer, primary_key=True)
+    trip_plan_id = db.Column(
+        db.Integer,
+        db.ForeignKey("trip_plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Soft link back to an existing ChildLocation, if the stop is one the user
+    # already tracks. ON DELETE SET NULL — removing a library spot shouldn't
+    # destroy a trip that referenced it; the stop just loses its link.
+    child_location_id = db.Column(
+        db.Integer,
+        db.ForeignKey("child_locations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    name = db.Column(db.String(255), nullable=False)
+    lat = db.Column(db.Float, nullable=False)
+    lng = db.Column(db.Float, nullable=False)
+    start_date = db.Column(db.Date, nullable=True)
+    end_date = db.Column(db.Date, nullable=True)
+    planning_notes = db.Column(db.Text, nullable=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    trip_plan = db.relationship("TripPlan", back_populates="stops")
+    child_location = db.relationship("ChildLocation")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "trip_plan_id": self.trip_plan_id,
+            "child_location_id": self.child_location_id,
+            "name": self.name,
+            "lat": self.lat,
+            "lng": self.lng,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
+            "end_date": self.end_date.isoformat() if self.end_date else None,
+            "planning_notes": self.planning_notes,
+            "sort_order": self.sort_order,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 # --- Phase 2+ models sketched out for future migrations ----------------------
 #
 # class ComfortLog(db.Model): ...
@@ -183,8 +287,6 @@ class WeatherCache(db.Model):
 # class NearbyAmenity(db.Model): ...
 # class NatureTag(db.Model): ...
 # class CorrectionFactor(db.Model): ...
-# class TripPlan(db.Model): ...
-# class TripStop(db.Model): ...
 #
 # Schemas for these live in the PROJECT-GUIDE.md feature spec. They will be
 # added in their own migrations as each phase comes online.

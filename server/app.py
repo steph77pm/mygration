@@ -18,6 +18,16 @@ Exposes a JSON API consumed by the React frontend:
                                           — historical digest for Future Planning research
     GET    /api/geocode/search?q=<query>  — WeatherAPI place search proxy
 
+    GET    /api/trips                     — list all trip plans with their stops
+    POST   /api/trips                     — create a new trip plan
+    GET    /api/trips/<id>                — one trip plan with stops
+    PATCH  /api/trips/<id>                — rename, recolor, or resort
+    DELETE /api/trips/<id>                — delete a trip plan (cascades to stops)
+    POST   /api/trips/<id>/stops          — add a stop to a trip plan
+    PATCH  /api/stops/<id>                — update a stop
+    DELETE /api/stops/<id>                — delete a stop
+    POST   /api/stops/<id>/move           — reorder a stop up or down within its trip
+
 In production on Railway, gunicorn serves this via the Procfile.
 """
 
@@ -34,7 +44,7 @@ from flask_migrate import Migrate
 
 from comfort_service import compute_comfort, estimate_bug_risk
 from config import Config
-from models import Bucket, ChildLocation, ParentArea, db
+from models import Bucket, ChildLocation, ParentArea, TripPlan, TripStop, db
 from weather_service import (
     WeatherAPIError,
     extract_detail,
@@ -365,6 +375,194 @@ def create_app(config: type = Config) -> Flask:
             return {"error": str(e)}, 502
         digest["child"] = child.to_dict()
         return jsonify(digest)
+
+    # -------------------------- Trip Planner ----------------------------------
+    #
+    # Phase 2 feature. Backend scope for this commit: CRUD over TripPlan + TripStop
+    # with a tiny up/down reorder endpoint. No weather yet — the companion
+    # /api/trips/<id>/weather endpoint is the next commit.
+
+    def _parse_iso_date(value):
+        """'2026-05-12' → date, '' / None → None. Raises ValueError on garbage."""
+        if value is None or value == "":
+            return None
+        from datetime import date
+
+        if isinstance(value, date):
+            return value
+        from datetime import datetime as dt
+
+        return dt.fromisoformat(str(value)).date()
+
+    @app.route("/api/trips", methods=["GET"])
+    def list_trips():
+        """All trip plans, ordered, with their stops nested."""
+        trips = TripPlan.query.order_by(TripPlan.sort_order, TripPlan.created_at).all()
+        return jsonify([t.to_dict() for t in trips])
+
+    @app.route("/api/trips", methods=["POST"])
+    def create_trip():
+        data = request.get_json(force=True, silent=True) or {}
+        name = (data.get("name") or "").strip()
+        if not name:
+            return {"error": "name is required"}, 400
+        # Default sort_order = end of current list so new trips append.
+        last = TripPlan.query.order_by(TripPlan.sort_order.desc()).first()
+        next_order = (last.sort_order + 1) if last else 0
+        trip = TripPlan(
+            name=name,
+            color=(data.get("color") or "#3b82f6")[:32],
+            sort_order=data.get("sort_order", next_order),
+        )
+        db.session.add(trip)
+        db.session.commit()
+        return jsonify(trip.to_dict()), 201
+
+    @app.route("/api/trips/<int:trip_id>", methods=["GET"])
+    def get_trip(trip_id: int):
+        trip = TripPlan.query.get_or_404(trip_id)
+        return jsonify(trip.to_dict())
+
+    @app.route("/api/trips/<int:trip_id>", methods=["PATCH"])
+    def update_trip(trip_id: int):
+        trip = TripPlan.query.get_or_404(trip_id)
+        data = request.get_json(force=True, silent=True) or {}
+        if "name" in data:
+            name = (data["name"] or "").strip()
+            if not name:
+                return {"error": "name cannot be empty"}, 400
+            trip.name = name
+        if "color" in data and data["color"]:
+            trip.color = str(data["color"])[:32]
+        if "sort_order" in data:
+            trip.sort_order = int(data["sort_order"])
+        db.session.commit()
+        return jsonify(trip.to_dict())
+
+    @app.route("/api/trips/<int:trip_id>", methods=["DELETE"])
+    def delete_trip(trip_id: int):
+        trip = TripPlan.query.get_or_404(trip_id)
+        db.session.delete(trip)
+        db.session.commit()
+        return "", 204
+
+    @app.route("/api/trips/<int:trip_id>/stops", methods=["POST"])
+    def create_stop(trip_id: int):
+        trip = TripPlan.query.get_or_404(trip_id)
+        data = request.get_json(force=True, silent=True) or {}
+        name = (data.get("name") or "").strip()
+        if not name:
+            return {"error": "name is required"}, 400
+        if data.get("lat") is None or data.get("lng") is None:
+            return {"error": "lat and lng are required"}, 400
+        try:
+            start_date = _parse_iso_date(data.get("start_date"))
+            end_date = _parse_iso_date(data.get("end_date"))
+        except ValueError:
+            return {"error": "start_date / end_date must be YYYY-MM-DD"}, 400
+
+        child_loc_id = data.get("child_location_id")
+        if child_loc_id is not None:
+            # Validate the link points to a real row so we don't accumulate ghosts.
+            if ChildLocation.query.get(child_loc_id) is None:
+                return {"error": "child_location_id does not exist"}, 400
+
+        # Append to end of stop list by default.
+        last = (
+            TripStop.query.filter_by(trip_plan_id=trip.id)
+            .order_by(TripStop.sort_order.desc())
+            .first()
+        )
+        next_order = (last.sort_order + 1) if last else 0
+
+        stop = TripStop(
+            trip_plan_id=trip.id,
+            child_location_id=child_loc_id,
+            name=name,
+            lat=float(data["lat"]),
+            lng=float(data["lng"]),
+            start_date=start_date,
+            end_date=end_date,
+            planning_notes=data.get("planning_notes"),
+            sort_order=data.get("sort_order", next_order),
+        )
+        db.session.add(stop)
+        db.session.commit()
+        return jsonify(stop.to_dict()), 201
+
+    @app.route("/api/stops/<int:stop_id>", methods=["PATCH"])
+    def update_stop(stop_id: int):
+        stop = TripStop.query.get_or_404(stop_id)
+        data = request.get_json(force=True, silent=True) or {}
+
+        if "name" in data:
+            name = (data["name"] or "").strip()
+            if not name:
+                return {"error": "name cannot be empty"}, 400
+            stop.name = name
+        for field in ("lat", "lng"):
+            if field in data and data[field] is not None:
+                setattr(stop, field, float(data[field]))
+        for field in ("start_date", "end_date"):
+            if field in data:
+                try:
+                    setattr(stop, field, _parse_iso_date(data[field]))
+                except ValueError:
+                    return {"error": f"{field} must be YYYY-MM-DD"}, 400
+        if "planning_notes" in data:
+            stop.planning_notes = data["planning_notes"]
+        if "child_location_id" in data:
+            cid = data["child_location_id"]
+            if cid is not None and ChildLocation.query.get(cid) is None:
+                return {"error": "child_location_id does not exist"}, 400
+            stop.child_location_id = cid
+        if "sort_order" in data:
+            stop.sort_order = int(data["sort_order"])
+        db.session.commit()
+        return jsonify(stop.to_dict())
+
+    @app.route("/api/stops/<int:stop_id>", methods=["DELETE"])
+    def delete_stop(stop_id: int):
+        stop = TripStop.query.get_or_404(stop_id)
+        db.session.delete(stop)
+        db.session.commit()
+        return "", 204
+
+    @app.route("/api/stops/<int:stop_id>/move", methods=["POST"])
+    def move_stop(stop_id: int):
+        """Swap sort_order with the stop above or below this one.
+
+        Body: {"direction": "up" | "down"}. No-op at the ends of the list.
+        Swap (not re-number) keeps DB writes small and avoids drift when
+        multiple stops are moved in a session.
+        """
+        stop = TripStop.query.get_or_404(stop_id)
+        data = request.get_json(force=True, silent=True) or {}
+        direction = (data.get("direction") or "").strip().lower()
+        if direction not in ("up", "down"):
+            return {"error": "direction must be 'up' or 'down'"}, 400
+
+        # Find the neighbor to swap with (strict ordering on sort_order).
+        q = TripStop.query.filter_by(trip_plan_id=stop.trip_plan_id)
+        if direction == "up":
+            neighbor = (
+                q.filter(TripStop.sort_order < stop.sort_order)
+                .order_by(TripStop.sort_order.desc())
+                .first()
+            )
+        else:
+            neighbor = (
+                q.filter(TripStop.sort_order > stop.sort_order)
+                .order_by(TripStop.sort_order.asc())
+                .first()
+            )
+        if neighbor is None:
+            # Already at the edge; return current state rather than erroring.
+            return jsonify(stop.to_dict())
+
+        stop.sort_order, neighbor.sort_order = neighbor.sort_order, stop.sort_order
+        db.session.commit()
+        return jsonify(stop.to_dict())
 
     @app.route("/api/children/<int:child_id>/weather/detail", methods=["GET"])
     def child_weather_detail(child_id: int):
