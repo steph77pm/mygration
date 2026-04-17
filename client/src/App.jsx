@@ -2,28 +2,25 @@ import { useEffect, useState } from 'react'
 import { LocationBucket } from './components/LocationBucket.jsx'
 import { LocationDetail } from './components/LocationDetail.jsx'
 import { LocationFormModal } from './components/LocationFormModal.jsx'
-import { useIsMobile } from './hooks/useMediaQuery.js'
 import { LocationsStoreProvider, useLocationsStore } from './hooks/useLocationsStore.jsx'
 import { SelectedChildProvider } from './hooks/useSelectedChild.jsx'
 
 /**
- * Mygration dashboard shell.
+ * Mygration app shell.
  *
- * Three collapsible buckets (Active, Watching, Future Planning) with default
- * expand states that depend on device size:
- *   - Desktop: Active + Watching expanded, Future Planning collapsed
- *   - Mobile: only Active expanded
- * Once the user toggles a bucket, their choice is remembered per device.
+ * Layout follows the prototype:
+ *   - `.app-header` row: title + nav buttons (Dashboard / Trip Planner)
+ *   - `.app-main`:       the current view
  *
- * The LocationsStoreProvider owns the fetched data + CRUD modal state. The
- * dashboard itself is small — all the real work happens in the providers and
- * the bucket/card components.
+ * Views:
+ *   - dashboard    → three always-visible buckets (Active / Watching / Future)
+ *   - tripPlanner  → placeholder card until Phase 2 lands
  */
 export default function App() {
   return (
     <LocationsStoreProvider>
       <SelectedChildProvider>
-        <Dashboard />
+        <AppShell />
         <LocationDetail />
         <LocationFormModal />
       </SelectedChildProvider>
@@ -31,11 +28,96 @@ export default function App() {
   )
 }
 
+function AppShell() {
+  const [view, setView] = useState('dashboard')
+  const online = useOnlineStatus()
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <h1 className="app-title">
+          <span className="title-my">My</span>gration
+        </h1>
+        <nav className="app-nav">
+          <button
+            type="button"
+            className={`nav-btn ${view === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setView('dashboard')}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            className={`nav-btn ${view === 'tripPlanner' ? 'active' : ''}`}
+            onClick={() => setView('tripPlanner')}
+          >
+            Trip Planner
+          </button>
+        </nav>
+      </header>
+
+      {!online && (
+        <div className="offline-banner" role="status">
+          You’re offline — showing last-known data.
+        </div>
+      )}
+
+      <main className="app-main">
+        {view === 'dashboard' ? <Dashboard /> : <TripPlannerPlaceholder />}
+      </main>
+    </div>
+  )
+}
+
+/**
+ * Dashboard body — renders the three buckets once the locations store has
+ * loaded. Always-visible (no bucket collapse).
+ */
+function Dashboard() {
+  const { locations, error } = useLocationsStore()
+
+  if (error) return <div className="global-error">Failed to load: {error}</div>
+  if (!locations) return <div className="global-loading">Loading…</div>
+
+  return (
+    <div className="dashboard">
+      <LocationBucket
+        bucketKey="active"
+        title="Active Locations"
+        areas={locations.active || []}
+      />
+      <LocationBucket
+        bucketKey="watching"
+        title="Watching"
+        areas={locations.watching || []}
+      />
+      <LocationBucket
+        bucketKey="future_planning"
+        title="Future Planning"
+        areas={locations.future_planning || []}
+      />
+    </div>
+  )
+}
+
+/** Placeholder content for the Trip Planner tab until Phase 2 ships. */
+function TripPlannerPlaceholder() {
+  return (
+    <div className="trip-planner-placeholder">
+      <div className="card">
+        <h2 className="section-title" style={{ marginBottom: 8 }}>
+          Trip planner
+        </h2>
+        <p className="section-sub">Coming soon.</p>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Small watcher for navigator.onLine. When offline, we show a banner so
  * Stephanie knows the data she's seeing came from the service worker cache
- * and not a live fetch. Not a perfect signal (browser API can be noisy on
- * some networks) but a useful hint.
+ * and not a live fetch.
  */
 function useOnlineStatus() {
   const [online, setOnline] = useState(
@@ -52,57 +134,4 @@ function useOnlineStatus() {
     }
   }, [])
   return online
-}
-
-function Dashboard() {
-  const { locations, error } = useLocationsStore()
-  const isMobile = useIsMobile()
-  const online = useOnlineStatus()
-
-  return (
-    <div className="app">
-      <header className="app-header">
-        <h1 className="app-title">
-          <span className="title-my">My</span>gration
-        </h1>
-        <p className="app-subtitle">Weather planning for van life</p>
-      </header>
-
-      {!online && (
-        <div className="offline-banner" role="status">
-          You’re offline — showing last-known data.
-        </div>
-      )}
-
-      {error && <div className="global-error">Failed to load: {error}</div>}
-
-      {!locations && !error && <div className="global-loading">Loading…</div>}
-
-      {locations && (
-        <main className="dashboard">
-          <LocationBucket
-            bucketKey="active"
-            title="Active Locations"
-            description="Where you are or heading to right now. Live weather, full comfort scoring."
-            areas={locations.active || []}
-            defaultOpen={true}
-          />
-          <LocationBucket
-            bucketKey="watching"
-            title="Watching"
-            description="Nearby backup options while you're in the area — pivot-ready."
-            areas={locations.watching || []}
-            defaultOpen={!isMobile}
-          />
-          <LocationBucket
-            bucketKey="future_planning"
-            title="Future Planning"
-            description="Long-horizon trip ideas. Historical research mode, no live data."
-            areas={locations.future_planning || []}
-            defaultOpen={false}
-          />
-        </main>
-      )}
-    </div>
-  )
 }

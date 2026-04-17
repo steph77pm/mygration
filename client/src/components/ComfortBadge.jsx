@@ -1,21 +1,20 @@
 /**
- * 1-10 comfort index badge with color coding.
- *
- *   >= 8: green (great)
- *   6-7.9: yellow-green (decent)
- *   4-5.9: orange (rough)
- *   < 4: red (avoid)
+ * Prototype-shaped comfort badge: a solid colored circle with the integer
+ * score (1–10) inside. Colors come from `.comfort-badge.s{1..10}` classes in
+ * app.css (green → red gradient, matching the prototype).
  */
-export function ComfortBadge({ score }) {
-  const rounded = Math.round(score * 10) / 10
-  let tier = 'bad'
-  if (score >= 8) tier = 'great'
-  else if (score >= 6) tier = 'ok'
-  else if (score >= 4) tier = 'rough'
+export function ComfortBadge({ score, size = 36 }) {
+  const rounded = Math.max(1, Math.min(10, Math.round(Number(score) || 0)))
+  const style = size !== 36
+    ? { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.44)}px` }
+    : undefined
   return (
-    <div className={`comfort-badge comfort-${tier}`} title="Comfort Index (1-10)">
-      <span className="comfort-score">{rounded.toFixed(1)}</span>
-      <span className="comfort-label">comfort</span>
-    </div>
+    <span
+      className={`comfort-badge s${rounded}`}
+      style={style}
+      title={`Comfort index ${rounded}/10`}
+    >
+      {rounded}
+    </span>
   )
 }

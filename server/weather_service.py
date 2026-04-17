@@ -324,12 +324,52 @@ def extract_summary(forecast_payload: dict) -> dict:
     """Pull the handful of fields the dashboard card needs from a forecast payload.
 
     Keeps the API response small and stable even if WeatherAPI's format shifts.
+    Includes derived alert flags (extended heat / extended cold) computed from
+    the forecast window, plus native WeatherAPI alerts if any.
     """
     try:
         current = forecast_payload.get("current", {})
         forecast_days = forecast_payload.get("forecast", {}).get("forecastday", [])
         today = forecast_days[0] if forecast_days else {}
         today_day = today.get("day", {})
+
+        # Map each forecast day once for reuse.
+        forecast_summary = [
+            {
+                "date": d.get("date"),
+                "high_f": (d.get("day") or {}).get("maxtemp_f"),
+                "low_f": (d.get("day") or {}).get("mintemp_f"),
+                "rain_chance_pct": (d.get("day") or {}).get("daily_chance_of_rain"),
+                "avg_humidity": (d.get("day") or {}).get("avghumidity"),
+                "condition": ((d.get("day") or {}).get("condition") or {}).get("text"),
+            }
+            for d in forecast_days
+        ]
+
+        # Derived "extended heat" / "extended cold" flags. Match prototype shape:
+        # if 3+ upcoming days have highs ≥85°F → heat alert; if 3+ have lows ≤35°F → cold alert.
+        heat_days = sum(1 for d in forecast_summary if (d["high_f"] or 0) >= 85)
+        cold_days = sum(1 for d in forecast_summary if (d["low_f"] is not None and d["low_f"] <= 35))
+
+        # Native WeatherAPI alerts (heat advisory, storm warnings, etc.)
+        native_alerts_raw = (forecast_payload.get("alerts") or {}).get("alert") or []
+        native_alerts = [
+            {
+                "headline": a.get("headline") or a.get("event"),
+                "severity": a.get("severity"),
+                "event": a.get("event"),
+            }
+            for a in native_alerts_raw
+        ]
+
+        alerts = {
+            "extended_heat": heat_days >= 3,
+            "extended_heat_days": heat_days,
+            "extended_cold": cold_days >= 3,
+            "extended_cold_days": cold_days,
+            "native": native_alerts,
+        }
+
         return {
             "current": {
                 "temp_f": current.get("temp_f"),
@@ -347,18 +387,9 @@ def extract_summary(forecast_payload: dict) -> dict:
                 "total_precip_in": today_day.get("totalprecip_in"),
                 "avg_humidity": today_day.get("avghumidity"),
             },
-            "forecast_days": [
-                {
-                    "date": d.get("date"),
-                    "high_f": (d.get("day") or {}).get("maxtemp_f"),
-                    "low_f": (d.get("day") or {}).get("mintemp_f"),
-                    "rain_chance_pct": (d.get("day") or {}).get("daily_chance_of_rain"),
-                    "avg_humidity": (d.get("day") or {}).get("avghumidity"),
-                    "condition": ((d.get("day") or {}).get("condition") or {}).get("text"),
-                }
-                for d in forecast_days
-            ],
+            "forecast_days": forecast_summary,
+            "alerts": alerts,
         }
     except Exception as e:  # defensive — never let a parsing bug kill the dashboard
         log.exception("Failed to extract weather summary: %s", e)
-        return {"current": None, "today": None, "forecast_days": []}
+        return {"current": None, "today": None, "forecast_days": [], "alerts": None}

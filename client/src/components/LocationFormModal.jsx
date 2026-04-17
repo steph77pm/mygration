@@ -237,6 +237,13 @@ function FormBody({ modalState, onClose, onSaved }) {
           }
         />
       </label>
+      {/* TODO: Watching-bucket seasonal_note field — prototype shows a
+          seasonal note on .watching-card, e.g. "Summer (Jul-Aug): Highs 60-70°F,
+          cool and foggy. Best birding mid-July for puffins." We render
+          child.seasonal_note || planning_notes || fallback in LocationCard,
+          but the form doesn't yet expose a dedicated seasonal_note textarea.
+          Add one (conditional on the parent's bucket === 'watching') once the
+          backend/schema gains the field. */}
 
       {error && <div className="form-error">{error}</div>}
 

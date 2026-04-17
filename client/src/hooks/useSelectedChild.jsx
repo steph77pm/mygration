@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useState } from 'react'
 /**
  * Shared "which child location is currently drilled-in?" state.
  *
- * Lives in context so ChildLocationRow (deep in the tree) can open the detail
+ * Lives in context so LocationCard (deep in the tree) can open the detail
  * modal without prop-drilling a callback through two intermediate components.
  *
  * The modal supports two modes:

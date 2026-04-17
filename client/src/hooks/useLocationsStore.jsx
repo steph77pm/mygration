@@ -10,7 +10,7 @@ import { api, loadLocations } from '../api.js'
  *   - delete actions (with confirm())
  *
  * Any component can grab what it needs via useLocationsStore(). This keeps
- * LocationBucket / ParentAreaCard / ChildLocationRow free of prop drilling.
+ * LocationBucket / LocationCard free of prop drilling.
  */
 const LocationsStoreContext = createContext(null)
 
