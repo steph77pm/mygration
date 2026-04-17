@@ -14,6 +14,9 @@ Exposes a JSON API consumed by the React frontend:
     GET    /api/children/<id>/weather     — live weather summary for a child
     GET    /api/children/<id>/weather/detail
                                           — hourly forecast + astro + wind for drill-in view
+    GET    /api/children/<id>/weather/historical?month=1-12
+                                          — historical digest for Future Planning research
+    GET    /api/geocode/search?q=<query>  — WeatherAPI place search proxy
 
 In production on Railway, gunicorn serves this via the Procfile.
 """
@@ -37,6 +40,7 @@ from weather_service import (
     extract_detail,
     extract_summary,
     fetch_current_and_forecast,
+    fetch_historical_month_digest,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -300,6 +304,33 @@ def create_app(config: type = Config) -> Flask:
         if resp.status_code != 200:
             return {"error": f"WeatherAPI search returned {resp.status_code}"}, 502
         return jsonify(resp.json())
+
+    @app.route("/api/children/<int:child_id>/weather/historical", methods=["GET"])
+    def child_weather_historical(child_id: int):
+        """Historical research digest for a Future Planning spot.
+
+        Query params:
+            month: 1-12 (required) — the calendar month to research
+
+        Samples 4 days from the most recent past year's same month, returns
+        a rollup + the individual sample days so Stephanie can see the shape
+        of the weather, not just an average.
+        """
+        child = ChildLocation.query.get_or_404(child_id)
+        month_raw = request.args.get("month", "").strip()
+        try:
+            month = int(month_raw)
+            if not (1 <= month <= 12):
+                raise ValueError
+        except ValueError:
+            return {"error": "month query param required, 1-12"}, 400
+        try:
+            digest = fetch_historical_month_digest(child, month)
+        except WeatherAPIError as e:
+            log.warning("Historical digest failed for child %s: %s", child_id, e)
+            return {"error": str(e)}, 502
+        digest["child"] = child.to_dict()
+        return jsonify(digest)
 
     @app.route("/api/children/<int:child_id>/weather/detail", methods=["GET"])
     def child_weather_detail(child_id: int):

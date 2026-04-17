@@ -124,6 +124,125 @@ def fetch_history(child: ChildLocation, date_str: str) -> dict:
     return data
 
 
+# --- Historical research digest (Future Planning bucket) -----------------
+
+# 4 sample dates per month — roughly one per week, avoiding month edges.
+_HISTORY_SAMPLE_DAYS = (4, 11, 18, 25)
+
+
+def _most_recent_past_year_for_month(target_month: int, today: Optional[datetime] = None) -> int:
+    """Return the most recent calendar year whose `target_month` is fully in the past.
+
+    Example: today is April 2026 →
+      - July   → 2025 (this year's July hasn't happened yet)
+      - March  → 2026 (this year's March is fully in the past)
+      - April  → 2025 (this year's April is in progress)
+    """
+    if today is None:
+        today = datetime.now(timezone.utc)
+    if target_month < today.month:
+        return today.year
+    return today.year - 1
+
+
+def fetch_historical_month_digest(child: ChildLocation, target_month: int) -> dict:
+    """Pull 4 sample days from a past month and aggregate into a planning digest.
+
+    Picks days 4/11/18/25 of `target_month` in the most recent past year, fetches
+    each via history.json (cached forever — history is immutable), and rolls up
+    an "expect roughly this" summary: avg high/low/humidity/rain/wind + a
+    typical-condition string.
+
+    Returns a dict shaped for direct JSON encoding:
+        {
+          "target_month": 7,
+          "sampled_year": 2025,
+          "samples": [ { "date", "high_f", "low_f", "humidity", ... }, ... ],
+          "aggregate": { "avg_high_f", ..., "typical_condition" },
+          "errors": [ "2025-07-25: ..." ]   # per-sample failures, non-fatal
+        }
+    """
+    if not (1 <= target_month <= 12):
+        raise ValueError(f"target_month must be 1..12, got {target_month!r}")
+
+    year = _most_recent_past_year_for_month(target_month)
+    samples = []
+    errors: list[str] = []
+    for day in _HISTORY_SAMPLE_DAYS:
+        date_str = f"{year:04d}-{target_month:02d}-{day:02d}"
+        try:
+            raw = fetch_history(child, date_str)
+        except WeatherAPIError as e:
+            # Free plan doesn't have history — surface gracefully rather than 500.
+            errors.append(f"{date_str}: {e}")
+            continue
+        try:
+            forecast_days = raw.get("forecast", {}).get("forecastday", []) or []
+            if not forecast_days:
+                errors.append(f"{date_str}: empty forecastday array")
+                continue
+            day_data = (forecast_days[0] or {}).get("day", {}) or {}
+            samples.append({
+                "date": date_str,
+                "high_f": day_data.get("maxtemp_f"),
+                "low_f": day_data.get("mintemp_f"),
+                "avg_humidity": day_data.get("avghumidity"),
+                "total_precip_in": day_data.get("totalprecip_in"),
+                "max_wind_mph": day_data.get("maxwind_mph"),
+                "condition": (day_data.get("condition") or {}).get("text"),
+                "condition_code": (day_data.get("condition") or {}).get("code"),
+                "daily_chance_of_rain": day_data.get("daily_chance_of_rain"),
+            })
+        except Exception as e:  # noqa: BLE001 — defensive
+            errors.append(f"{date_str}: parse error: {e}")
+
+    aggregate = _aggregate_samples(samples)
+    return {
+        "target_month": target_month,
+        "sampled_year": year,
+        "samples": samples,
+        "aggregate": aggregate,
+        "errors": errors,
+    }
+
+
+def _aggregate_samples(samples: list[dict]) -> dict:
+    """Mean the numeric fields and take the modal condition string."""
+    if not samples:
+        return {
+            "avg_high_f": None, "avg_low_f": None, "avg_humidity": None,
+            "avg_precip_in": None, "avg_max_wind_mph": None,
+            "avg_rain_chance_pct": None, "typical_condition": None,
+            "sample_count": 0,
+        }
+
+    def _mean(key: str) -> Optional[float]:
+        vals = [s[key] for s in samples if s.get(key) is not None]
+        if not vals:
+            return None
+        return round(sum(vals) / len(vals), 1)
+
+    # Typical condition = the condition text that appears most often across samples;
+    # ties broken by first-seen.
+    counts: dict[str, int] = {}
+    for s in samples:
+        c = s.get("condition")
+        if c:
+            counts[c] = counts.get(c, 0) + 1
+    typical = max(counts, key=counts.get) if counts else None
+
+    return {
+        "avg_high_f": _mean("high_f"),
+        "avg_low_f": _mean("low_f"),
+        "avg_humidity": _mean("avg_humidity"),
+        "avg_precip_in": _mean("total_precip_in"),
+        "avg_max_wind_mph": _mean("max_wind_mph"),
+        "avg_rain_chance_pct": _mean("daily_chance_of_rain"),
+        "typical_condition": typical,
+        "sample_count": len(samples),
+    }
+
+
 def extract_detail(forecast_payload: dict) -> dict:
     """Pull the detailed fields the drill-in view needs from a forecast payload.
 

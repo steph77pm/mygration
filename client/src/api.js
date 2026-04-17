@@ -34,6 +34,8 @@ export const api = {
   deleteChild: (id) => request(`/children/${id}`, { method: 'DELETE' }),
   getChildWeather: (id) => request(`/children/${id}/weather`),
   getChildWeatherDetail: (id) => request(`/children/${id}/weather/detail`),
+  getChildHistorical: (id, month) =>
+    request(`/children/${id}/weather/historical?month=${encodeURIComponent(month)}`),
   searchPlaces: (q) => request(`/geocode/search?q=${encodeURIComponent(q)}`),
 }
 

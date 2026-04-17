@@ -40,13 +40,14 @@ export function ChildLocationRow({ child, parentName, showLiveWeather }) {
     }
   }, [child.id, showLiveWeather])
 
-  // Rows open detail on click. Future Planning rows also open detail now
-  // (historical mode) — the detail component decides which data to fetch.
-  const onRowClick = () => setSelectedChild(child)
+  // Rows open detail on click. Future Planning rows open the same modal in
+  // historical research mode (pick-a-month digest) instead of live hourly.
+  const mode = showLiveWeather ? 'live' : 'historical'
+  const onRowClick = () => setSelectedChild(child, mode)
   const onRowKey = (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      setSelectedChild(child)
+      setSelectedChild(child, mode)
     }
   }
 
