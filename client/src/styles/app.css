@@ -852,7 +852,8 @@ body {
     padding: 0;
     align-items: stretch;
   }
-  .detail-panel {
+  .detail-panel,
+  .form-modal {
     max-width: none;
     max-height: 100vh;
     height: 100vh;
@@ -874,4 +875,318 @@ body {
   .detail-astro {
     grid-template-columns: 1fr;
   }
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================================
+ * CRUD UI — action buttons, form modal, location picker
+ * ============================================================================ */
+
+/* --- Small icon buttons (edit ✎, delete ×) used on parent + child rows --- */
+
+.icon-btn {
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  padding: 0;
+}
+.icon-btn:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.icon-btn-danger:hover {
+  background: var(--comfort-bad);
+  color: white;
+  border-color: var(--comfort-bad);
+}
+
+/* Parent action buttons sit to the right of the header */
+.parent-header {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.parent-toggle { flex: 1; min-width: 0; }
+.parent-actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+.parent-notes {
+  flex-basis: 100%;
+  order: 2;
+}
+
+/* Child action buttons in their grid slot */
+.child-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  justify-self: end;
+}
+
+/* --- Bucket "+ Add area" button in the header --- */
+
+.bucket-header {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.bucket-description { flex-basis: 100%; order: 2; }
+
+.bucket-add {
+  background: transparent;
+  border: 1px dashed var(--accent-soft);
+  color: var(--accent-soft);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.bucket-add:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+/* "+ Add spot" inside an expanded parent */
+.add-child-btn {
+  margin-top: 0.25rem;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.add-child-btn:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-color: var(--accent-soft);
+  border-style: solid;
+}
+
+/* Empty-bucket inline "Add one?" link-button */
+.empty-bucket-add {
+  background: none;
+  border: none;
+  color: var(--accent-soft);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.empty-bucket-add:hover { color: var(--accent); }
+
+/* --- Form modal (reuses .detail-overlay for the backdrop) --- */
+
+.form-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: detail-slide 0.2s ease-out;
+}
+
+.form-body {
+  overflow-y: auto;
+  padding: 1rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.form-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.form-hint {
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink-muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  padding: 0.55rem 0.7rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.95rem;
+  transition: border-color 0.12s, background 0.12s;
+}
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.form-field textarea {
+  resize: vertical;
+  min-height: 3.5rem;
+  font-family: inherit;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.form-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--comfort-bad);
+  color: #fecaca;
+  padding: 0.55rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 0.25rem;
+}
+
+.btn {
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.9rem;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--border);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+/* --- Location picker (autocomplete dropdown) --- */
+
+.location-picker {
+  position: relative;
+}
+
+.picker-results {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0.25rem;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.picker-loading {
+  padding: 0.5rem 0.75rem;
+  color: var(--ink-soft);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.picker-result {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font: inherit;
+  transition: background 0.1s;
+}
+.picker-result:hover,
+.picker-result:focus-visible {
+  background: var(--surface-soft);
+  outline: none;
+}
+
+.picker-name {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.picker-country {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
 }

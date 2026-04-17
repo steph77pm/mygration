@@ -24,6 +24,7 @@ import logging
 import os
 from pathlib import Path
 
+import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_migrate import Migrate
@@ -273,6 +274,32 @@ def create_app(config: type = Config) -> Flask:
                 recent_rain_inches=today.get("total_precip_in") or 0,
             )
         return jsonify(summary)
+
+    @app.route("/api/geocode/search", methods=["GET"])
+    def geocode_search():
+        """Location search autocomplete proxy for the 'add location' form.
+
+        Thin passthrough to WeatherAPI's search.json. We proxy server-side so
+        the API key never leaves the backend and so we can add caching later.
+        Returns up to ~10 suggestions with {id, name, region, country, lat, lon}.
+        """
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify([])
+        if not Config.WEATHER_API_KEY:
+            return {"error": "WEATHER_API_KEY not configured"}, 500
+        try:
+            resp = requests.get(
+                f"{Config.WEATHER_API_BASE}/search.json",
+                params={"key": Config.WEATHER_API_KEY, "q": q},
+                timeout=8,
+            )
+        except requests.RequestException as e:
+            log.warning("Geocode search failed: %s", e)
+            return {"error": str(e)}, 502
+        if resp.status_code != 200:
+            return {"error": f"WeatherAPI search returned {resp.status_code}"}, 502
+        return jsonify(resp.json())
 
     @app.route("/api/children/<int:child_id>/weather/detail", methods=["GET"])
     def child_weather_detail(child_id: int):

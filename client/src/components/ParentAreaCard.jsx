@@ -1,4 +1,5 @@
 import { usePersistedState } from '../hooks/usePersistedState.js'
+import { useLocationsStore } from '../hooks/useLocationsStore.jsx'
 import { ChildLocationRow } from './ChildLocationRow.jsx'
 
 /**
@@ -13,8 +14,16 @@ import { ChildLocationRow } from './ChildLocationRow.jsx'
  */
 export function ParentAreaCard({ area, showLiveWeather }) {
   const [expanded, setExpanded] = usePersistedState(`mygration.area.${area.id}`, true)
+  const { openEditParent, openAddChild, deleteParent } = useLocationsStore()
+
   const children = area.children || []
   const childCount = children.length
+
+  // Action buttons must not bubble up and collapse the card.
+  const stop = (fn) => (e) => {
+    e.stopPropagation()
+    fn()
+  }
 
   return (
     <article className={`parent-area ${expanded ? 'expanded' : 'collapsed'}`}>
@@ -40,6 +49,26 @@ export function ParentAreaCard({ area, showLiveWeather }) {
             </svg>
           </span>
         </button>
+        <div className="parent-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={stop(() => openEditParent(area))}
+            aria-label={`Edit ${area.name}`}
+            title="Edit area"
+          >
+            ✎
+          </button>
+          <button
+            type="button"
+            className="icon-btn icon-btn-danger"
+            onClick={stop(() => deleteParent(area))}
+            aria-label={`Delete ${area.name}`}
+            title="Delete area"
+          >
+            ×
+          </button>
+        </div>
         {area.planning_notes && (
           <p className="parent-notes">{area.planning_notes}</p>
         )}
@@ -53,10 +82,18 @@ export function ParentAreaCard({ area, showLiveWeather }) {
               <ChildLocationRow
                 key={child.id}
                 child={child}
+                parentName={area.name}
                 showLiveWeather={showLiveWeather}
               />
             ))
           )}
+          <button
+            type="button"
+            className="add-child-btn"
+            onClick={() => openAddChild(area.id, area.name)}
+          >
+            + Add spot
+          </button>
         </div>
       )}
     </article>

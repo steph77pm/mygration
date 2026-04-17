@@ -1,4 +1,5 @@
 import { usePersistedState } from '../hooks/usePersistedState.js'
+import { useLocationsStore } from '../hooks/useLocationsStore.jsx'
 import { ParentAreaCard } from './ParentAreaCard.jsx'
 
 /**
@@ -16,6 +17,14 @@ import { ParentAreaCard } from './ParentAreaCard.jsx'
  */
 export function LocationBucket({ bucketKey, title, description, areas, defaultOpen }) {
   const [open, setOpen] = usePersistedState(`mygration.bucket.${bucketKey}`, defaultOpen)
+  const { openAddParent } = useLocationsStore()
+
+  // Click handler for the "Add Area" button. Stops propagation so the bucket
+  // header's collapse toggle doesn't fire.
+  const handleAdd = (e) => {
+    e.stopPropagation()
+    openAddParent(bucketKey)
+  }
 
   return (
     <section className={`bucket bucket-${bucketKey} ${open ? 'open' : 'closed'}`}>
@@ -34,12 +43,26 @@ export function LocationBucket({ bucketKey, title, description, areas, defaultOp
             {areas.length}
           </span>
         </button>
+        <button
+          type="button"
+          className="bucket-add"
+          onClick={handleAdd}
+          aria-label={`Add area to ${title}`}
+          title="Add a new area"
+        >
+          + Add area
+        </button>
         <p className="bucket-description">{description}</p>
       </header>
       {open && (
         <div id={`bucket-body-${bucketKey}`} className="bucket-body">
           {areas.length === 0 ? (
-            <div className="empty-bucket">No locations in this bucket yet.</div>
+            <div className="empty-bucket">
+              No locations in this bucket yet.{' '}
+              <button type="button" className="empty-bucket-add" onClick={handleAdd}>
+                Add one?
+              </button>
+            </div>
           ) : (
             areas.map((area) => (
               <ParentAreaCard

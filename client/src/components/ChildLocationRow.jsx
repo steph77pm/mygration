@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
+import { useLocationsStore } from '../hooks/useLocationsStore.jsx'
 import { useSelectedChild } from '../hooks/useSelectedChild.jsx'
 import { ComfortBadge } from './ComfortBadge.jsx'
 
@@ -8,14 +9,16 @@ import { ComfortBadge } from './ComfortBadge.jsx'
  *
  * Shows the core glance-view: current temp, humidity, comfort index, bug risk.
  * Clicking the row opens the detail drill-in view (hourly, sun/wind/astro).
- * For Future Planning locations, skips the live weather fetch and the drill-in
- * (detail-view historical mode lands in a later phase).
+ * Edit / delete buttons stop propagation so they don't also open the detail.
+ * Future Planning rows skip the live weather fetch and open the historical
+ * detail view instead of the live one.
  */
-export function ChildLocationRow({ child, showLiveWeather }) {
+export function ChildLocationRow({ child, parentName, showLiveWeather }) {
   const [weather, setWeather] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(showLiveWeather)
   const { setSelectedChild } = useSelectedChild()
+  const { openEditChild, deleteChild } = useLocationsStore()
 
   useEffect(() => {
     if (!showLiveWeather) return
@@ -37,25 +40,29 @@ export function ChildLocationRow({ child, showLiveWeather }) {
     }
   }, [child.id, showLiveWeather])
 
-  const clickable = showLiveWeather
-  const onRowClick = clickable ? () => setSelectedChild(child) : undefined
-  const onRowKey = clickable
-    ? (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          setSelectedChild(child)
-        }
-      }
-    : undefined
+  // Rows open detail on click. Future Planning rows also open detail now
+  // (historical mode) — the detail component decides which data to fetch.
+  const onRowClick = () => setSelectedChild(child)
+  const onRowKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      setSelectedChild(child)
+    }
+  }
+
+  const stop = (fn) => (e) => {
+    e.stopPropagation()
+    fn()
+  }
 
   return (
     <div
-      className={`child-row ${clickable ? 'child-row-clickable' : ''}`}
+      className="child-row child-row-clickable"
       onClick={onRowClick}
       onKeyDown={onRowKey}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-label={clickable ? `Open detail view for ${child.name}` : undefined}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open detail view for ${child.name}`}
     >
       <div className="child-name-block">
         <div className="child-name-row">
@@ -73,7 +80,7 @@ export function ChildLocationRow({ child, showLiveWeather }) {
 
       {!showLiveWeather && (
         <div className="child-historical-hint">
-          Historical mode — no live data pulled. Click to explore past conditions.
+          Historical mode — tap to research past conditions.
         </div>
       )}
 
@@ -106,6 +113,27 @@ export function ChildLocationRow({ child, showLiveWeather }) {
           )}
         </div>
       )}
+
+      <div className="child-actions">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={stop(() => openEditChild(child, parentName))}
+          aria-label={`Edit ${child.name}`}
+          title="Edit spot"
+        >
+          ✎
+        </button>
+        <button
+          type="button"
+          className="icon-btn icon-btn-danger"
+          onClick={stop(() => deleteChild(child))}
+          aria-label={`Delete ${child.name}`}
+          title="Delete spot"
+        >
+          ×
+        </button>
+      </div>
     </div>
   )
 }
