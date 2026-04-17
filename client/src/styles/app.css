@@ -273,6 +273,7 @@ body {
 .parent-name-block {
   display: flex;
   flex-direction: column;
+  flex: 1;                      /* push the parent-icon to the far right of the header */
 }
 
 .parent-name {

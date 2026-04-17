@@ -5,7 +5,8 @@ about, weighted by how much they actually affect her day-to-day decisions:
 
     humidity           (heaviest weight)
     temperature        (comfortable range: 55-78F)
-    rain frequency
+    rain frequency     (penalty modulated by humidity — dry rain is fine,
+                        muggy rain is miserable)
     wind speed
 
 Standalone callouts (NOT averaged into the score — surfaced separately by
@@ -87,9 +88,34 @@ def _temperature_score(temp_f: float) -> float:
     return max(0.0, 10.0 - (delta / (100 - TEMP_COMFORT_MAX)) * 10.0)
 
 
-def _rain_score(rain_chance_pct: float) -> float:
-    """Higher rain chance = lower comfort. Linear."""
-    return max(0.0, 10.0 - (rain_chance_pct / 10.0))
+def _rain_score(rain_chance_pct: float, humidity_pct: float) -> float:
+    """Rain's comfort penalty scales with humidity.
+
+    Stephanie's insight (Phase 1 field test): "Heavy rain doesn't inherently
+    make me uncomfortable. Rain + humidity does though." Rain in dry air dries
+    off, the van ventilates, and it's fine. Rain in muggy air is where things
+    stay wet, smell musty, and comfort tanks.
+
+    So we keep a linear base penalty from rain chance, but multiply it by a
+    humidity modulator:
+
+        humidity <= 30%RH   → modulator 0.0  (rain barely penalizes)
+        humidity >= 75%RH   → modulator 1.0  (full penalty — muggy + wet)
+        30-75%RH            → linear ramp
+
+    Example: 80% rain chance at 35%RH scores ~9.1 (rain almost free),
+             80% rain chance at 80%RH scores 2.0 (full hit).
+    """
+    if humidity_pct <= 30:
+        modulator = 0.0
+    elif humidity_pct >= 75:
+        modulator = 1.0
+    else:
+        modulator = (humidity_pct - 30) / (75 - 30)
+
+    base_penalty = rain_chance_pct / 10.0  # 0-10 penalty before modulation
+    effective_penalty = base_penalty * modulator
+    return max(0.0, 10.0 - effective_penalty)
 
 
 def _wind_score(wind_mph: float) -> float:
@@ -112,7 +138,7 @@ def compute_comfort(
     subs = {
         "humidity": _humidity_score(humidity_pct),
         "temperature": _temperature_score(temp_f),
-        "rain": _rain_score(rain_chance_pct),
+        "rain": _rain_score(rain_chance_pct, humidity_pct),
         "wind": _wind_score(wind_mph),
     }
     composite = sum(subs[k] * WEIGHTS[k] for k in WEIGHTS)
