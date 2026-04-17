@@ -28,6 +28,11 @@ export function ParentAreaCard({ area, showLiveWeather }) {
           <span className="chevron" aria-hidden="true">
             {expanded ? '▾' : '▸'}
           </span>
+          <span className="location-icon parent-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 20" fill="currentColor" width="100%" height="100%">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 5.25 7 12 8 12s8-6.75 8-12c0-4.42-3.58-8-8-8zm0 11c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
+            </svg>
+          </span>
           <div className="parent-name-block">
             <h3 className="parent-name">{area.name}</h3>
             <span className="parent-meta">

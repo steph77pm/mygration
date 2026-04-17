@@ -23,11 +23,12 @@
   /* Bucket tints — distinct enough to scan, tuned for dark bg */
   --active-tint: #4ade80;       /* bright green — you're here now */
   --watching-tint: #fbbf24;     /* amber — pivot-ready */
-  --future-tint: #94a3b8;       /* slate — later */
+  --future-tint: #60a5fa;       /* blue — distinct from active green */
 
-  /* Comfort tiers — saturated colors pop on dark */
+  /* Comfort tiers — green (great) / purple (ok) / amber (rough) / red (bad).
+   * Deliberately avoid two shades of green so tiers are unambiguous at a glance. */
   --comfort-great: #22c55e;
-  --comfort-ok: #84cc16;
+  --comfort-ok: #a855f7;        /* purple — not yet-another-green-ish */
   --comfort-rough: #f59e0b;
   --comfort-bad: #ef4444;
 
@@ -146,9 +147,39 @@ body {
 
 .chevron {
   display: inline-block;
-  width: 1em;
-  color: var(--ink-soft);
+  width: 1.1em;
+  font-size: 1.1em;
+  font-weight: 700;
+  color: var(--accent-soft);
   transition: transform 0.15s;
+  line-height: 1;
+}
+
+/* --- Location icons (parent/child hierarchy affordance) --- */
+
+.location-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+/* Parent pin: filled, colored by the bucket it's in (cascade via .bucket-*) */
+.location-icon.parent-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.bucket-active .location-icon.parent-icon { color: var(--active-tint); }
+.bucket-watching .location-icon.parent-icon { color: var(--watching-tint); }
+.bucket-future_planning .location-icon.parent-icon { color: var(--future-tint); }
+
+/* Child dot: smaller, muted — signals "sub-location under the parent above" */
+.location-icon.child-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--ink-muted);
 }
 
 .bucket-title {
@@ -205,10 +236,14 @@ body {
 
 .parent-area {
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border);   /* becomes bucket-tinted via cascade */
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
 }
+.bucket-active .parent-area { border-left-color: var(--active-tint); }
+.bucket-watching .parent-area { border-left-color: var(--watching-tint); }
+.bucket-future_planning .parent-area { border-left-color: var(--future-tint); }
 
 .parent-header {
   padding: 0.6rem 0.75rem;
@@ -290,6 +325,13 @@ body {
 .child-name-block {
   display: flex;
   flex-direction: column;
+  gap: 0.15rem;
+}
+
+.child-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .child-name {
@@ -298,10 +340,12 @@ body {
   font-weight: 500;
 }
 
+/* Indent coords to align under the name, not under the child-icon */
 .child-coords {
   font-size: 0.75rem;
-  color: var(--ink-soft);
+  color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
+  padding-left: calc(12px + 0.5rem);
 }
 
 .child-loading,
@@ -355,6 +399,14 @@ body {
   color: var(--ink-soft);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Labels that sit inside a colored chip (solid bg) need a white/translucent
+ * tone to stay legible against the chip color, regardless of tier. */
+.comfort-badge .comfort-label,
+.bug-risk .bug-label {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
 }
 
 /* --- Comfort badge --- */
@@ -429,13 +481,29 @@ body {
     font-size: 1.75rem;
   }
 
+  /* Mobile layout: name on its own row, then temp + humidity prominent,
+   * then comfort + bug chips underneath. Makes the vital numbers the
+   * first thing your eye lands on. */
   .child-row {
     grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
+    gap: 0.5rem 0.75rem;
   }
 
   .child-name-block {
     grid-column: 1 / -1;
+  }
+
+  /* Bigger temperature — the most important glance-value */
+  .temp {
+    font-size: 1.85rem;
+  }
+  .feels-like {
+    font-size: 0.75rem;
+  }
+
+  /* Bigger humidity — second most important glance-value */
+  .humidity {
+    font-size: 1.5rem;
   }
 
   .bucket-body {

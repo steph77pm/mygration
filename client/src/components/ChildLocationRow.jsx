@@ -37,7 +37,14 @@ export function ChildLocationRow({ child, showLiveWeather }) {
   return (
     <div className="child-row">
       <div className="child-name-block">
-        <h4 className="child-name">{child.name}</h4>
+        <div className="child-name-row">
+          <span className="location-icon child-icon" aria-hidden="true">
+            <svg viewBox="0 0 12 12" fill="currentColor" width="100%" height="100%">
+              <circle cx="6" cy="6" r="4" />
+            </svg>
+          </span>
+          <h4 className="child-name">{child.name}</h4>
+        </div>
         <span className="child-coords">
           {child.lat.toFixed(3)}, {child.lng.toFixed(3)}
         </span>
