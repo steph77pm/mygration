@@ -1,0 +1,40 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+
+# --- Vite / build output ---
+client/dist/
+client/.vite/
+client/dev-dist/
+
+# --- Databases (local dev SQLite) ---
+server/data/*.db
+server/data/*.db-journal
+
+# --- Alembic runtime files (keep migrations/, ignore working state) ---
+server/migrations/versions/*.pyc
+
+# --- Editor/OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- Secrets ---
+.env
+.env.local
+.env.*.local
