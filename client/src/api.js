@@ -33,6 +33,7 @@ export const api = {
   updateChild: (id, data) => request(`/children/${id}`, { method: 'PATCH', body: data }),
   deleteChild: (id) => request(`/children/${id}`, { method: 'DELETE' }),
   getChildWeather: (id) => request(`/children/${id}/weather`),
+  getChildWeatherDetail: (id) => request(`/children/${id}/weather/detail`),
 }
 
 // Mock data — used when the backend isn't running yet. Matches the API

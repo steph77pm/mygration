@@ -124,6 +124,83 @@ def fetch_history(child: ChildLocation, date_str: str) -> dict:
     return data
 
 
+def extract_detail(forecast_payload: dict) -> dict:
+    """Pull the detailed fields the drill-in view needs from a forecast payload.
+
+    Goes beyond extract_summary: returns hourly breakdown for the next 48h
+    (today + tomorrow), astro info (sunrise/sunset/moon), and current wind
+    direction. Frontend slices to whatever window it wants to display.
+    """
+    try:
+        current = forecast_payload.get("current", {}) or {}
+        location = forecast_payload.get("location", {}) or {}
+        forecast_days = forecast_payload.get("forecast", {}).get("forecastday", []) or []
+        today = forecast_days[0] if forecast_days else {}
+        today_day = today.get("day", {}) or {}
+        today_astro = today.get("astro", {}) or {}
+
+        hourly = []
+        for day_data in forecast_days[:2]:  # today + tomorrow = 48 hours
+            for hour in day_data.get("hour", []) or []:
+                condition = hour.get("condition") or {}
+                hourly.append({
+                    "time": hour.get("time"),                # "2026-04-17 14:00" local
+                    "time_epoch": hour.get("time_epoch"),
+                    "temp_f": hour.get("temp_f"),
+                    "feels_like_f": hour.get("feelslike_f"),
+                    "humidity": hour.get("humidity"),
+                    "wind_mph": hour.get("wind_mph"),
+                    "wind_dir": hour.get("wind_dir"),        # compass, e.g. "NNE"
+                    "chance_of_rain": hour.get("chance_of_rain"),
+                    "precip_in": hour.get("precip_in"),
+                    "condition": condition.get("text"),
+                    "condition_code": condition.get("code"),
+                    "is_day": hour.get("is_day"),
+                })
+
+        return {
+            "current": {
+                "temp_f": current.get("temp_f"),
+                "feels_like_f": current.get("feelslike_f"),
+                "humidity": current.get("humidity"),
+                "wind_mph": current.get("wind_mph"),
+                "wind_dir": current.get("wind_dir"),
+                "wind_degree": current.get("wind_degree"),
+                "condition": (current.get("condition") or {}).get("text"),
+                "condition_code": (current.get("condition") or {}).get("code"),
+                "is_day": current.get("is_day"),
+                "last_updated": current.get("last_updated"),
+                "last_updated_epoch": current.get("last_updated_epoch"),
+            },
+            "today": {
+                "high_f": today_day.get("maxtemp_f"),
+                "low_f": today_day.get("mintemp_f"),
+                "rain_chance_pct": today_day.get("daily_chance_of_rain"),
+                "total_precip_in": today_day.get("totalprecip_in"),
+                "avg_humidity": today_day.get("avghumidity"),
+                "condition": (today_day.get("condition") or {}).get("text"),
+                "max_wind_mph": today_day.get("maxwind_mph"),
+            },
+            "astro": {
+                "sunrise": today_astro.get("sunrise"),       # "06:23 AM"
+                "sunset": today_astro.get("sunset"),         # "07:48 PM"
+                "moonrise": today_astro.get("moonrise"),
+                "moonset": today_astro.get("moonset"),
+                "moon_phase": today_astro.get("moon_phase"),
+            },
+            "location_tz": location.get("tz_id"),
+            "location_localtime": location.get("localtime"),
+            "location_localtime_epoch": location.get("localtime_epoch"),
+            "hourly": hourly,
+        }
+    except Exception as e:  # defensive — never let a parsing bug kill the detail view
+        log.exception("Failed to extract weather detail: %s", e)
+        return {
+            "current": None, "today": None, "astro": None,
+            "location_tz": None, "location_localtime": None, "hourly": [],
+        }
+
+
 def extract_summary(forecast_payload: dict) -> dict:
     """Pull the handful of fields the dashboard card needs from a forecast payload.
 

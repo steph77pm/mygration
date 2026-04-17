@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
+import { useSelectedChild } from '../hooks/useSelectedChild.jsx'
 import { ComfortBadge } from './ComfortBadge.jsx'
 
 /**
  * A single child location (a specific spot, e.g., "Coast Spot").
  *
  * Shows the core glance-view: current temp, humidity, comfort index, bug risk.
- * For Future Planning locations, skips the live weather fetch and shows a
- * "historical mode" hint instead.
+ * Clicking the row opens the detail drill-in view (hourly, sun/wind/astro).
+ * For Future Planning locations, skips the live weather fetch and the drill-in
+ * (detail-view historical mode lands in a later phase).
  */
 export function ChildLocationRow({ child, showLiveWeather }) {
   const [weather, setWeather] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(showLiveWeather)
+  const { setSelectedChild } = useSelectedChild()
 
   useEffect(() => {
     if (!showLiveWeather) return
@@ -34,8 +37,26 @@ export function ChildLocationRow({ child, showLiveWeather }) {
     }
   }, [child.id, showLiveWeather])
 
+  const clickable = showLiveWeather
+  const onRowClick = clickable ? () => setSelectedChild(child) : undefined
+  const onRowKey = clickable
+    ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          setSelectedChild(child)
+        }
+      }
+    : undefined
+
   return (
-    <div className="child-row">
+    <div
+      className={`child-row ${clickable ? 'child-row-clickable' : ''}`}
+      onClick={onRowClick}
+      onKeyDown={onRowKey}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `Open detail view for ${child.name}` : undefined}
+    >
       <div className="child-name-block">
         <div className="child-name-row">
           <span className="location-icon child-icon" aria-hidden="true">

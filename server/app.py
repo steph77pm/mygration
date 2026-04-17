@@ -12,6 +12,8 @@ Exposes a JSON API consumed by the React frontend:
     PATCH  /api/children/<id>             — update a child location
     DELETE /api/children/<id>             — delete a child location
     GET    /api/children/<id>/weather     — live weather summary for a child
+    GET    /api/children/<id>/weather/detail
+                                          — hourly forecast + astro + wind for drill-in view
 
 In production on Railway, gunicorn serves this via the Procfile.
 """
@@ -29,7 +31,12 @@ from flask_migrate import Migrate
 from comfort_service import compute_comfort, estimate_bug_risk
 from config import Config
 from models import Bucket, ChildLocation, ParentArea, db
-from weather_service import WeatherAPIError, extract_summary, fetch_current_and_forecast
+from weather_service import (
+    WeatherAPIError,
+    extract_detail,
+    extract_summary,
+    fetch_current_and_forecast,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("mygration")
@@ -266,6 +273,25 @@ def create_app(config: type = Config) -> Flask:
                 recent_rain_inches=today.get("total_precip_in") or 0,
             )
         return jsonify(summary)
+
+    @app.route("/api/children/<int:child_id>/weather/detail", methods=["GET"])
+    def child_weather_detail(child_id: int):
+        """Full weather detail for the drill-in view: hourly + astro + wind.
+
+        Same upstream cache as the dashboard summary, so clicking into a spot
+        doesn't cost a second WeatherAPI call.
+        """
+        child = ChildLocation.query.get_or_404(child_id)
+        try:
+            raw = fetch_current_and_forecast(child)
+        except WeatherAPIError as e:
+            log.warning("Weather detail fetch failed for child %s: %s", child_id, e)
+            return {"error": str(e)}, 502
+        detail = extract_detail(raw)
+        # Include the child's own identity so the frontend can render the header
+        # even if it loads the detail screen directly.
+        detail["child"] = child.to_dict()
+        return jsonify(detail)
 
     return app
 
