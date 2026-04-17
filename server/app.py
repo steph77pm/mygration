@@ -23,6 +23,7 @@ Exposes a JSON API consumed by the React frontend:
     GET    /api/trips/<id>                — one trip plan with stops
     PATCH  /api/trips/<id>                — rename, recolor, or resort
     DELETE /api/trips/<id>                — delete a trip plan (cascades to stops)
+    GET    /api/trips/<id>/weather        — per-stop weather projection + trip summary
     POST   /api/trips/<id>/stops          — add a stop to a trip plan
     PATCH  /api/stops/<id>                — update a stop
     DELETE /api/stops/<id>                — delete a stop
@@ -566,10 +567,16 @@ def create_app(config: type = Config) -> Flask:
 
     @app.route("/api/children/<int:child_id>/weather/detail", methods=["GET"])
     def child_weather_detail(child_id: int):
-        """Full weather detail for the drill-in view: hourly + astro + wind.
+        """Full weather detail for the drill-in view.
 
-        Same upstream cache as the dashboard summary, so clicking into a spot
-        doesn't cost a second WeatherAPI call.
+        Returns the union of the dashboard summary (comfort, bug risk, alerts,
+        10-day forecast) and the detail fields (hourly + astro + wind). Same
+        upstream cache as the summary endpoint, so clicking into a spot doesn't
+        cost a second WeatherAPI call.
+
+        The drill-in needs comfort/alerts/forecast to render the header badge,
+        alerts list, 10-day table, and comfort-breakdown modal — all of which
+        were missing when `detail` was hourly-only.
         """
         child = ChildLocation.query.get_or_404(child_id)
         try:
@@ -577,11 +584,215 @@ def create_app(config: type = Config) -> Flask:
         except WeatherAPIError as e:
             log.warning("Weather detail fetch failed for child %s: %s", child_id, e)
             return {"error": str(e)}, 502
+
         detail = extract_detail(raw)
-        # Include the child's own identity so the frontend can render the header
-        # even if it loads the detail screen directly.
+        summary = extract_summary(raw)
+
+        # Pull the useful summary bits into the detail response so the frontend
+        # only has to hit one endpoint. Don't overwrite detail.current — it's
+        # richer (has wind_dir, wind_degree, condition_code etc.).
+        detail["forecast_days"] = summary.get("forecast_days") or []
+        detail["alerts"] = summary.get("alerts")
+
+        # Compute comfort + bug risk from the detail's current data (same shape
+        # as child_weather does).
+        current = detail.get("current") or {}
+        today = detail.get("today") or {}
+        if current.get("temp_f") is not None and current.get("humidity") is not None:
+            comfort = compute_comfort(
+                temp_f=current["temp_f"],
+                humidity_pct=current["humidity"],
+                rain_chance_pct=today.get("rain_chance_pct") or 0,
+                wind_mph=current.get("wind_mph") or 0,
+            )
+            detail["comfort"] = comfort.to_dict()
+            detail["bug_risk"] = estimate_bug_risk(
+                temp_f=current["temp_f"],
+                humidity_pct=current["humidity"],
+                recent_rain_inches=today.get("total_precip_in") or 0,
+            )
+
         detail["child"] = child.to_dict()
         return jsonify(detail)
+
+    @app.route("/api/trips/<int:trip_id>/weather", methods=["GET"])
+    def trip_weather(trip_id: int):
+        """Per-stop weather projection for a trip plan.
+
+        For each stop:
+          - Fetch forecast + current (cached for ~1h). Shared cache with the
+            dashboard so a stop that matches a tracked child is effectively free.
+          - If the stop has a start_date within the forecast window (~10 days),
+            use that specific forecast day's numbers. Otherwise fall back to
+            "current conditions" at that lat/lng — a reasonable preview even if
+            the trip is farther out. WeatherAPI free plan = 3 days; paid = 14.
+          - Compute comfort score and bug risk from the numbers we end up with.
+          - Surface the same alerts the dashboard uses.
+
+        Stops that fail to fetch (invalid coords, API down) return mode='error'
+        so the UI can render a "—" without a hard failure.
+
+        Response shape:
+            {
+              "trip_id": 1,
+              "stops": [ { stop_id, mode, temp_f, humidity, comfort, ... }, ... ],
+              "summary": { avg_comfort, worst_bug, has_warnings }
+            }
+        """
+        trip = TripPlan.query.get_or_404(trip_id)
+
+        from datetime import date, timedelta as _td
+
+        today = date.today()
+        forecast_window_end = today + _td(days=9)  # inclusive: today + next 9 = 10 days
+
+        bug_rank = {"low": 0, "moderate": 1, "high": 2, "severe": 3}
+        out_stops: list[dict] = []
+
+        # Use a temporary ChildLocation-shaped object so we can reuse
+        # fetch_current_and_forecast/extract_summary. The shim only needs
+        # .id, .lat, .lng (id is used as the cache key).
+        class _StopShim:
+            def __init__(self, stop: TripStop):
+                # Use a negative id so we don't collide with real child_location
+                # cache rows. Same coords → same cache entry across runs.
+                self.id = -(stop.id)
+                self.lat = stop.lat
+                self.lng = stop.lng
+
+        for stop in sorted(trip.stops, key=lambda s: (s.sort_order, s.id)):
+            entry: dict = {
+                "stop_id": stop.id,
+                "mode": "unknown",
+                "temp_f": None,
+                "humidity": None,
+                "condition": None,
+                "bug_risk": None,
+                "comfort": None,
+                "alerts": None,
+                "error": None,
+            }
+            try:
+                shim = _StopShim(stop)
+                raw = fetch_current_and_forecast(shim)  # type: ignore[arg-type]
+                summary = extract_summary(raw)
+            except WeatherAPIError as e:
+                entry["mode"] = "error"
+                entry["error"] = str(e)
+                out_stops.append(entry)
+                continue
+
+            forecast_days = summary.get("forecast_days") or []
+            current = summary.get("current") or {}
+            today_dict = summary.get("today") or {}
+            alerts = summary.get("alerts") or {}
+
+            # Prefer a specific forecast day if the stop's start_date falls
+            # inside the forecast window we have.
+            target_day = None
+            mode = "current"
+            if stop.start_date and today <= stop.start_date <= forecast_window_end:
+                iso = stop.start_date.isoformat()
+                for d in forecast_days:
+                    if d.get("date") == iso:
+                        target_day = d
+                        mode = "forecast"
+                        break
+
+            if target_day is not None:
+                entry["mode"] = "forecast"
+                entry["temp_f"] = target_day.get("high_f")
+                entry["low_f"] = target_day.get("low_f")
+                entry["humidity"] = target_day.get("avg_humidity")
+                entry["condition"] = target_day.get("condition")
+                entry["rain_chance_pct"] = target_day.get("rain_chance_pct")
+                # Comfort for a future day: use its high temp + avg humidity
+                # + rain chance. Wind unknown at this level of detail so pass
+                # a neutral value (falls into the "comfortable" bucket).
+                if (
+                    entry["temp_f"] is not None
+                    and entry["humidity"] is not None
+                ):
+                    c = compute_comfort(
+                        temp_f=entry["temp_f"],
+                        humidity_pct=entry["humidity"],
+                        rain_chance_pct=entry.get("rain_chance_pct") or 0,
+                        wind_mph=0,  # not in forecast_days payload
+                    )
+                    entry["comfort"] = c.to_dict()
+                    entry["bug_risk"] = estimate_bug_risk(
+                        temp_f=entry["temp_f"],
+                        humidity_pct=entry["humidity"],
+                        recent_rain_inches=0,
+                    )
+            else:
+                # "current" mode — use right-now conditions.
+                entry["mode"] = mode
+                entry["temp_f"] = current.get("temp_f")
+                entry["humidity"] = current.get("humidity")
+                entry["condition"] = current.get("condition")
+                if (
+                    current.get("temp_f") is not None
+                    and current.get("humidity") is not None
+                ):
+                    c = compute_comfort(
+                        temp_f=current["temp_f"],
+                        humidity_pct=current["humidity"],
+                        rain_chance_pct=today_dict.get("rain_chance_pct") or 0,
+                        wind_mph=current.get("wind_mph") or 0,
+                    )
+                    entry["comfort"] = c.to_dict()
+                    entry["bug_risk"] = estimate_bug_risk(
+                        temp_f=current["temp_f"],
+                        humidity_pct=current["humidity"],
+                        recent_rain_inches=today_dict.get("total_precip_in") or 0,
+                    )
+
+            # Alert tags: extended heat/cold from forecast_days, plus native.
+            entry["alerts"] = {
+                "extended_heat": bool(alerts.get("extended_heat")),
+                "extended_heat_days": alerts.get("extended_heat_days") or 0,
+                "extended_cold": bool(alerts.get("extended_cold")),
+                "extended_cold_days": alerts.get("extended_cold_days") or 0,
+                "native": alerts.get("native") or [],
+            }
+            out_stops.append(entry)
+
+        # Trip-level summary: avg comfort, worst bug, any warnings flag.
+        comfort_scores = [
+            s["comfort"]["composite"]
+            for s in out_stops
+            if s.get("comfort") and s["comfort"].get("composite") is not None
+        ]
+        worst_bug = None
+        for s in out_stops:
+            b = s.get("bug_risk")
+            if b and (worst_bug is None or bug_rank.get(b, -1) > bug_rank.get(worst_bug, -1)):
+                worst_bug = b
+
+        has_warnings = any(
+            (s.get("alerts") or {}).get("extended_heat")
+            or (s.get("alerts") or {}).get("extended_cold")
+            or ((s.get("alerts") or {}).get("native") or [])
+            for s in out_stops
+        )
+
+        trip_summary = {
+            "avg_comfort": (
+                round(sum(comfort_scores) / len(comfort_scores), 1)
+                if comfort_scores
+                else None
+            ),
+            "worst_bug": worst_bug,
+            "has_warnings": has_warnings,
+            "stop_count": len(out_stops),
+        }
+
+        return jsonify({
+            "trip_id": trip.id,
+            "stops": out_stops,
+            "summary": trip_summary,
+        })
 
     return app
 
