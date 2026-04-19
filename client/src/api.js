@@ -58,6 +58,9 @@ export const api = {
   moveStop: (id, direction) =>
     request(`/stops/${id}/move`, { method: 'POST', body: { direction } }),
   getTripWeather: (id) => request(`/trips/${id}/weather`),
+  // Used by the Dashboard "plan buckets" to show today + 10-day forecast
+  // per stop, same response shape as getChildWeather.
+  getStopWeather: (id) => request(`/stops/${id}/weather`),
 }
 
 // Mock data — used when the backend isn't running yet. Matches the API

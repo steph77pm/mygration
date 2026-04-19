@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { LocationBucket } from './components/LocationBucket.jsx'
 import { LocationDetail } from './components/LocationDetail.jsx'
 import { LocationFormModal } from './components/LocationFormModal.jsx'
+import { PlanBucket } from './components/PlanBucket.jsx'
 import { TripFormModal } from './components/TripFormModal.jsx'
 import { TripPlanner } from './components/TripPlanner.jsx'
 import { LocationsStoreProvider, useLocationsStore } from './hooks/useLocationsStore.jsx'
 import { SelectedChildProvider } from './hooks/useSelectedChild.jsx'
-import { TripsStoreProvider } from './hooks/useTripsStore.jsx'
+import { TripsStoreProvider, useTripsStore } from './hooks/useTripsStore.jsx'
 
 /**
  * Mygration app shell.
@@ -77,14 +78,22 @@ function AppShell() {
 }
 
 /**
- * Dashboard body — renders the three buckets once the locations store has
- * loaded. Always-visible (no bucket collapse).
+ * Dashboard body — renders the three location buckets plus one bucket per
+ * trip plan. Always-visible (no bucket collapse).
+ *
+ * Order is Active → Plans → Watching → Future Planning so near-term travel
+ * (Active + Plans) sits above the exploratory buckets.
  */
 function Dashboard() {
   const { locations, error } = useLocationsStore()
+  // Trip buckets load independently; if trips haven't arrived yet we just
+  // render without them rather than blocking the whole dashboard.
+  const { trips } = useTripsStore()
 
   if (error) return <div className="global-error">Failed to load: {error}</div>
   if (!locations) return <div className="global-loading">Loading…</div>
+
+  const planList = Array.isArray(trips) ? trips : []
 
   return (
     <div className="dashboard">
@@ -93,6 +102,9 @@ function Dashboard() {
         title="Active Locations"
         areas={locations.active || []}
       />
+      {planList.map((trip) => (
+        <PlanBucket key={trip.id} trip={trip} />
+      ))}
       <LocationBucket
         bucketKey="watching"
         title="Watching"

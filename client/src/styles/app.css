@@ -136,6 +136,21 @@ body {
 
 .bucket { display: block; }
 
+/* Plan buckets reuse the default bucket/card styles; the only bespoke
+ * treatment is a small color dot next to the plan name so it's obvious
+ * which Trip Planner track it came from. */
+.plan-bucket-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.plan-stop-card { cursor: default; }
+.plan-stop-card:hover { border-color: #334155; }
+
 /* ---------- 4. Card / button / comfort / alert / bug ---------- */
 
 .card {

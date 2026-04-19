@@ -33,6 +33,7 @@ Exposes a JSON API consumed by the React frontend:
     PATCH  /api/stops/<id>                — update a stop
     DELETE /api/stops/<id>                — delete a stop
     POST   /api/stops/<id>/move           — reorder a stop up or down within its trip
+    GET    /api/stops/<id>/weather        — live weather summary for a stop (Dashboard plan buckets)
 
 In production on Railway, gunicorn serves this via the Procfile.
 """
@@ -762,6 +763,54 @@ def create_app(config: type = Config) -> Flask:
         stop.sort_order, neighbor.sort_order = neighbor.sort_order, stop.sort_order
         db.session.commit()
         return jsonify(stop.to_dict())
+
+    @app.route("/api/stops/<int:stop_id>/weather", methods=["GET"])
+    def stop_weather(stop_id: int):
+        """Live weather summary + comfort index for a trip stop.
+
+        Mirrors /api/children/<id>/weather but keyed on a TripStop's lat/lng.
+        Used by the Dashboard's plan buckets: each stop renders as a card with
+        today's conditions + 10-day forecast. Intentionally *ignores*
+        stop.start_date — Stephanie iterates dates too much for a date-keyed
+        forecast to be useful outside the Trip Planner itself. The Trip Planner
+        views (Timeline/List/Calendar) keep their date-aware projection via
+        /api/trips/<id>/weather.
+        """
+        stop = TripStop.query.get_or_404(stop_id)
+
+        # Reuse the same shim trick /api/trips/<id>/weather uses so we share
+        # the forecast cache (same coords → same hit), with a negative id that
+        # can't collide with real child_location cache rows.
+        class _StopShim:
+            id = -stop.id
+            lat = stop.lat
+            lng = stop.lng
+
+        try:
+            raw = fetch_current_and_forecast(_StopShim())  # type: ignore[arg-type]
+        except WeatherAPIError as e:
+            log.warning("Weather fetch failed for stop %s: %s", stop_id, e)
+            return {"error": str(e)}, 502
+        summary = extract_summary(raw)
+        current = summary.get("current") or {}
+        today = summary.get("today") or {}
+        if (
+            current.get("temp_f") is not None
+            and current.get("humidity") is not None
+        ):
+            comfort = compute_comfort(
+                temp_f=current["temp_f"],
+                humidity_pct=current["humidity"],
+                rain_chance_pct=today.get("rain_chance_pct") or 0,
+                wind_mph=current.get("wind_mph") or 0,
+            )
+            summary["comfort"] = comfort.to_dict()
+            summary["bug_risk"] = estimate_bug_risk(
+                temp_f=current["temp_f"],
+                humidity_pct=current["humidity"],
+                recent_rain_inches=today.get("total_precip_in") or 0,
+            )
+        return jsonify(summary)
 
     @app.route("/api/children/<int:child_id>/weather/detail", methods=["GET"])
     def child_weather_detail(child_id: int):
