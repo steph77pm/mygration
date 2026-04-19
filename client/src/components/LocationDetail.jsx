@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
+import { useLocationsStore } from '../hooks/useLocationsStore.jsx'
 import { useSelectedChild } from '../hooks/useSelectedChild.jsx'
 import { ComfortBadge } from './ComfortBadge.jsx'
 import { alertTagsFor, humidityLabel } from './LocationCard.jsx'
@@ -129,6 +130,7 @@ function LiveMode({ childId }) {
     <>
       <DetailContent
         detail={detail}
+        childId={childId}
         onOpenBreakdown={() => setBreakdownOpen(true)}
       />
       {breakdownOpen && (
@@ -141,7 +143,7 @@ function LiveMode({ childId }) {
   )
 }
 
-function DetailContent({ detail, onOpenBreakdown }) {
+function DetailContent({ detail, childId, onOpenBreakdown }) {
   const current = detail.current || {}
   const today = detail.today || {}
   const astro = detail.astro || {}
@@ -150,6 +152,7 @@ function DetailContent({ detail, onOpenBreakdown }) {
   const alerts = detail.alerts || {}
   const bugRisk = detail.bug_risk
   const forecast = Array.isArray(detail.forecast_days) ? detail.forecast_days : []
+  const child = detail.child || {}
 
   // Slice hourly to "from now (local) onward, next 24 hours".
   const nowEpoch = detail.location_localtime_epoch || Math.floor(Date.now() / 1000)
@@ -259,6 +262,7 @@ function DetailContent({ detail, onOpenBreakdown }) {
                   <th>High/Low</th>
                   <th>Humidity</th>
                   <th>Rain</th>
+                  <th>Wind</th>
                 </tr>
               </thead>
               <tbody>
@@ -281,6 +285,11 @@ function DetailContent({ detail, onOpenBreakdown }) {
                         ? `${d.rain_chance_pct}%`
                         : '—'}
                     </td>
+                    <td>
+                      {d.max_wind_mph != null
+                        ? `${Math.round(d.max_wind_mph)} mph`
+                        : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -288,6 +297,8 @@ function DetailContent({ detail, onOpenBreakdown }) {
           </div>
         </section>
       )}
+
+      {childId && <TemperatureDistributionCard childId={childId} />}
 
       <section className="card detail-card detail-hourly-card">
         <div className="card-section-title">Next 24 hours</div>
@@ -300,6 +311,10 @@ function DetailContent({ detail, onOpenBreakdown }) {
           ))}
         </div>
       </section>
+
+      {child?.id && <PlanningNotesCard child={child} />}
+      {childId && <WeatherLogCaptureCard childId={childId} />}
+      {childId && <WeatherLogsHistoryCard childId={childId} />}
     </>
   )
 }
@@ -348,6 +363,398 @@ function BugInd({ level, note }) {
       🪲 {label}
     </span>
   )
+}
+
+// -------------------------------------------------------------------------
+// Temperature Distribution card — histogram of recent daily highs
+// -------------------------------------------------------------------------
+
+function TemperatureDistributionCard({ childId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!childId) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api
+      .getChildDistribution(childId)
+      .then((d) => {
+        if (!cancelled) setData(d)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [childId])
+
+  if (loading) {
+    return (
+      <section className="card detail-card">
+        <div className="card-section-title">Temperature Distribution</div>
+        <div className="detail-loading">Loading distribution…</div>
+      </section>
+    )
+  }
+  if (error) {
+    // Keep a soft failure — the rest of the detail still works.
+    return null
+  }
+  if (!data || !Array.isArray(data.bins) || data.samples_used === 0) {
+    return null
+  }
+
+  const subLabel =
+    data.samples_used >= 20
+      ? `Based on last ${data.samples_used} days`
+      : `Based on last ${data.samples_used} days (limited sample)`
+
+  return (
+    <section className="card detail-card">
+      <div className="card-section-title">Temperature Distribution</div>
+      <div className="card-section-sub">
+        {subLabel}
+        {data.most_likely && (
+          <>
+            . Most likely: <strong>{data.most_likely}</strong>
+          </>
+        )}
+      </div>
+      {data.bins.map((b) => (
+        <div className="temp-dist-row" key={b.label}>
+          <div className="temp-dist-label">
+            <span>{b.label}</span>
+            <strong>{b.pct}%</strong>
+          </div>
+          <div className="temp-dist-bar">
+            <div
+              className="temp-dist-segment"
+              style={{ width: `${b.pct}%`, background: b.fill }}
+            />
+          </div>
+        </div>
+      ))}
+      <div className="dist-legend">
+        {data.avg_humidity != null && (
+          <span>Avg humidity: {Math.round(data.avg_humidity)}%</span>
+        )}
+        {data.rain_days != null && <span>Rain days: {data.rain_days}/mo</span>}
+      </div>
+    </section>
+  )
+}
+
+// -------------------------------------------------------------------------
+// Editable planning notes — pencil → textarea → save
+// -------------------------------------------------------------------------
+
+function PlanningNotesCard({ child }) {
+  const { refresh } = useLocationsStore()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(child.planning_notes || '')
+  // Optimistic copy so the card shows the new value immediately after save,
+  // without waiting for the detail payload to be refetched.
+  const [current, setCurrent] = useState(child.planning_notes || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  // Reset if a different child is loaded.
+  useEffect(() => {
+    setCurrent(child.planning_notes || '')
+    if (!editing) setDraft(child.planning_notes || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [child.id])
+
+  const startEdit = () => {
+    setDraft(current)
+    setError(null)
+    setEditing(true)
+  }
+  const cancel = () => {
+    setEditing(false)
+    setError(null)
+  }
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const trimmed = draft.trim()
+      await api.updateChild(child.id, { planning_notes: trimmed || null })
+      setCurrent(trimmed)
+      await refresh()
+      setEditing(false)
+    } catch (e) {
+      setError(e.message || 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="card detail-card">
+      <div className="editable-notes-head">
+        <div className="card-section-title" style={{ margin: 0 }}>
+          Planning notes
+        </div>
+        {!editing && (
+          <button
+            type="button"
+            className="editable-notes-edit"
+            onClick={startEdit}
+            aria-label="Edit planning notes"
+          >
+            ✎ Edit
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="editable-notes-block">
+          <textarea
+            className="editable-notes-textarea"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={4}
+            placeholder="Anything worth remembering about this spot."
+            autoFocus
+          />
+          {error && <div className="form-error">{error}</div>}
+          <div className="editable-notes-actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={cancel}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={save}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      ) : current ? (
+        <p className="editable-notes-text">{current}</p>
+      ) : (
+        <p className="editable-notes-empty">
+          No notes yet — tap Edit to add one.
+        </p>
+      )}
+    </section>
+  )
+}
+
+// -------------------------------------------------------------------------
+// Weather Log capture card — 3 rating rows + notes + submit
+// -------------------------------------------------------------------------
+
+const RATING_VALUES = ['up', 'neutral', 'down']
+const RATING_ICON = { up: '👍', neutral: '—', down: '👎' }
+
+function WeatherLogCaptureCard({ childId }) {
+  // Bump this key to re-mount the history card after a successful save.
+  const [historyKey, setHistoryKey] = useState(0)
+  const [ratings, setRatings] = useState({
+    temp: null,
+    humidity: null,
+    bug: null,
+  })
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [justSaved, setJustSaved] = useState(false)
+  const [error, setError] = useState(null)
+
+  const setR = (key, value) =>
+    setRatings((r) => ({ ...r, [key]: r[key] === value ? null : value }))
+
+  const submit = async () => {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api.createChildLog(childId, {
+        temp_rating: ratings.temp,
+        humidity_rating: ratings.humidity,
+        bug_rating: ratings.bug,
+        note: note.trim() || null,
+      })
+      setRatings({ temp: null, humidity: null, bug: null })
+      setNote('')
+      setJustSaved(true)
+      setHistoryKey((k) => k + 1)
+      // History card listens on the same event via a custom event below.
+      window.dispatchEvent(new CustomEvent('mygration:log-saved', { detail: { childId } }))
+      setTimeout(() => setJustSaved(false), 2500)
+    } catch (e) {
+      setError(e.message || 'Save failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const anyRating = Object.values(ratings).some(Boolean) || note.trim().length > 0
+
+  return (
+    <section className="card detail-card">
+      <div className="quick-log">
+        <div className="log-title">📝 Log Today's Conditions</div>
+        <div className="log-subtitle">
+          How does it actually feel compared to the forecast?
+        </div>
+        <LogRatingRow label="Temp" value={ratings.temp} onChange={(v) => setR('temp', v)} />
+        <LogRatingRow
+          label="Humidity"
+          value={ratings.humidity}
+          onChange={(v) => setR('humidity', v)}
+        />
+        <LogRatingRow label="Bugs" value={ratings.bug} onChange={(v) => setR('bug', v)} />
+        <textarea
+          className="log-notes"
+          rows={3}
+          placeholder="Add notes… (e.g., 'afternoon turned muggy, hard to stay in the van')"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        {error && <div className="form-error">{error}</div>}
+        {justSaved ? (
+          <div className="log-submitted">✓ Logged!</div>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary log-submit"
+            disabled={submitting || !anyRating}
+            onClick={submit}
+          >
+            {submitting ? 'Saving…' : '📤 Save Log Entry'}
+          </button>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function LogRatingRow({ label, value, onChange }) {
+  return (
+    <div className="log-rating-row">
+      <span className="log-rating-label">{label}</span>
+      <div className="log-rating-buttons">
+        {RATING_VALUES.map((v) => (
+          <button
+            key={v}
+            type="button"
+            className={`log-rating-btn${value === v ? ` sel-${v}` : ''}`}
+            onClick={() => onChange(v)}
+            aria-pressed={value === v}
+            aria-label={`${label} ${v}`}
+          >
+            {RATING_ICON[v]}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// -------------------------------------------------------------------------
+// Weather Logs history — list of past entries
+// -------------------------------------------------------------------------
+
+function WeatherLogsHistoryCard({ childId }) {
+  const [logs, setLogs] = useState(null)
+  const [error, setError] = useState(null)
+
+  const load = () => {
+    if (!childId) return
+    api
+      .listChildLogs(childId)
+      .then(setLogs)
+      .catch((e) => setError(e.message))
+  }
+
+  useEffect(() => {
+    load()
+    // Refresh when a log is saved in the capture card.
+    const handler = (e) => {
+      if (!e.detail || e.detail.childId === childId) load()
+    }
+    window.addEventListener('mygration:log-saved', handler)
+    return () => window.removeEventListener('mygration:log-saved', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childId])
+
+  const onDelete = async (id) => {
+    if (!window.confirm('Delete this log entry?')) return
+    try {
+      await api.deleteLog(id)
+      load()
+    } catch (e) {
+      window.alert(`Delete failed: ${e.message}`)
+    }
+  }
+
+  if (error) return null
+  if (logs == null) return null
+
+  return (
+    <section className="card detail-card">
+      <div className="card-section-title">Your Weather Logs</div>
+      {logs.length === 0 ? (
+        <p className="no-logs">No logs yet — log today's conditions above.</p>
+      ) : (
+        <div className="logs-list">
+          {logs.map((log) => (
+            <LogEntry key={log.id} log={log} onDelete={() => onDelete(log.id)} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function LogEntry({ log, onDelete }) {
+  const dateLabel = formatLogDate(log.logged_at)
+  return (
+    <div className="log-entry">
+      <div className="log-date">📅 {dateLabel}</div>
+      <button
+        type="button"
+        className="log-delete"
+        onClick={onDelete}
+        aria-label="Delete log entry"
+        title="Delete log"
+      >
+        ×
+      </button>
+      <div className="log-ratings">
+        <span>Temp: {RATING_ICON[log.temp_rating] || '—'}</span>
+        <span>Humidity: {RATING_ICON[log.humidity_rating] || '—'}</span>
+        <span>Bugs: {RATING_ICON[log.bug_rating] || '—'}</span>
+      </div>
+      {log.note && <p className="log-note">"{log.note}"</p>}
+    </div>
+  )
+}
+
+/** "2026-04-18T14:03:00" → "Apr 18, 2026" */
+function formatLogDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 /**

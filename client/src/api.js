@@ -36,7 +36,15 @@ export const api = {
   getChildWeatherDetail: (id) => request(`/children/${id}/weather/detail`),
   getChildHistorical: (id, month) =>
     request(`/children/${id}/weather/historical?month=${encodeURIComponent(month)}`),
+  getChildDistribution: (id) =>
+    request(`/children/${id}/weather/distribution`),
   searchPlaces: (q) => request(`/geocode/search?q=${encodeURIComponent(q)}`),
+
+  // --- Weather Logs (Phase 2+) ---
+  listChildLogs: (id) => request(`/children/${id}/logs`),
+  createChildLog: (id, data) =>
+    request(`/children/${id}/logs`, { method: 'POST', body: data }),
+  deleteLog: (id) => request(`/logs/${id}`, { method: 'DELETE' }),
 
   // --- Trip Planner (Phase 2) ---
   listTrips: () => request('/trips'),

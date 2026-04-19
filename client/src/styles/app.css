@@ -1199,6 +1199,215 @@ body {
   border-top: 1px solid #334155;
 }
 
+/* -------------------------------------------------------------------------
+ * Weather Logs (capture card + history list)
+ * ----------------------------------------------------------------------- */
+.quick-log { display: flex; flex-direction: column; gap: 12px; }
+.log-title { font-size: 16px; color: #f1f5f9; font-weight: 600; }
+.log-subtitle { font-size: 13px; color: #64748b; margin-bottom: 4px; }
+.log-rating-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.log-rating-label { font-size: 14px; color: #cbd5e1; }
+.log-rating-buttons { display: flex; gap: 6px; }
+.log-rating-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #64748b;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.log-rating-btn:hover { border-color: #475569; }
+.log-rating-btn.sel-up {
+  background: rgba(34,197,94,0.2);
+  border-color: #22c55e;
+  color: #22c55e;
+}
+.log-rating-btn.sel-neutral {
+  background: rgba(251,191,36,0.2);
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+.log-rating-btn.sel-down {
+  background: rgba(239,68,68,0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.log-notes {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+.log-notes::placeholder { color: #475569; }
+.log-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+.log-submitted {
+  text-align: center;
+  padding: 12px;
+  color: #4ade80;
+  font-size: 14px;
+}
+
+.logs-list { display: flex; flex-direction: column; gap: 12px; }
+.log-entry {
+  background: rgba(15,23,42,0.5);
+  border-radius: 8px;
+  padding: 12px 16px;
+  position: relative;
+}
+.log-date {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.log-ratings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+.log-note {
+  font-size: 13px;
+  color: #cbd5e1;
+  font-style: italic;
+  margin: 0;
+}
+.log-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #475569;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.log-delete:hover { color: #f87171; background: rgba(239,68,68,0.08); }
+.no-logs {
+  color: #64748b;
+  font-size: 14px;
+  font-style: italic;
+  margin: 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Temperature Distribution
+ * ----------------------------------------------------------------------- */
+.card-section-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+.card-section-sub strong { color: #fbbf24; }
+.temp-dist-row { margin: 8px 0; }
+.temp-dist-label {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+.temp-dist-label strong { color: #f1f5f9; }
+.temp-dist-bar {
+  width: 100%;
+  height: 10px;
+  background: #1e293b;
+  border-radius: 5px;
+  overflow: hidden;
+  display: flex;
+}
+.temp-dist-segment { height: 100%; }
+.dist-legend {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* -------------------------------------------------------------------------
+ * Editable planning notes (pencil-to-edit)
+ * ----------------------------------------------------------------------- */
+.editable-notes-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.editable-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.editable-notes-edit {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.editable-notes-edit:hover { color: #cbd5e1; background: rgba(51,65,85,0.4); }
+.editable-notes-text {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+}
+.editable-notes-empty {
+  font-size: 13px;
+  color: #475569;
+  font-style: italic;
+}
+.editable-notes-textarea {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 80px;
+}
+.editable-notes-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 767px) {
   .detail-grid { grid-template-columns: 1fr; }
   .modal-content { width: 94%; padding: 18px; }

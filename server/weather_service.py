@@ -258,6 +258,106 @@ def _aggregate_samples(samples: list[dict]) -> dict:
     }
 
 
+def fetch_temperature_distribution(
+    child: ChildLocation, days_back: int = 30
+) -> dict:
+    """Bin the past N days' daily average temps into 5 fixed buckets.
+
+    Used by the Temperature Distribution card. For each of the past
+    `days_back` days we pull history.json (cached forever — HISTORY_TTL=30d),
+    extract the daily avgtemp_f, and bin into five ranges. Returns the shape
+    the frontend's stacked bar wants.
+
+    The bins are fixed (not adaptive) so consecutive months are comparable:
+        < 40°F, 40-59, 60-69, 70-79, 80-89, ≥ 90°F
+    """
+    today = datetime.now(timezone.utc).date()
+    bin_defs = [
+        ("<40°F", -99, 39.999, "#60a5fa"),
+        ("40-59°F", 40, 59.999, "#34d399"),
+        ("60-69°F", 60, 69.999, "#fbbf24"),
+        ("70-79°F", 70, 79.999, "#f97316"),
+        ("80-89°F", 80, 89.999, "#ef4444"),
+        ("≥90°F", 90, 999, "#b91c1c"),
+    ]
+    counts = [0] * len(bin_defs)
+
+    rain_days = 0
+    humidity_sum = 0.0
+    humidity_n = 0
+    errors: list[str] = []
+    samples_used = 0
+
+    for offset in range(1, days_back + 1):  # skip today (not complete)
+        d = today - timedelta(days=offset)
+        date_str = d.isoformat()
+        try:
+            raw = fetch_history(child, date_str)
+        except WeatherAPIError as e:
+            errors.append(f"{date_str}: {e}")
+            continue
+        try:
+            forecast_days = raw.get("forecast", {}).get("forecastday", []) or []
+            if not forecast_days:
+                errors.append(f"{date_str}: empty forecastday")
+                continue
+            day_data = (forecast_days[0] or {}).get("day", {}) or {}
+            avg_t = day_data.get("avgtemp_f")
+            if avg_t is None:
+                errors.append(f"{date_str}: no avgtemp_f")
+                continue
+            samples_used += 1
+
+            placed = False
+            for i, (_, lo, hi, _) in enumerate(bin_defs):
+                if lo <= avg_t <= hi:
+                    counts[i] += 1
+                    placed = True
+                    break
+            if not placed:
+                errors.append(f"{date_str}: avgtemp {avg_t} outside bins")
+
+            # Rain day = any measurable precip
+            if (day_data.get("totalprecip_in") or 0) > 0.01:
+                rain_days += 1
+
+            h = day_data.get("avghumidity")
+            if h is not None:
+                humidity_sum += h
+                humidity_n += 1
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{date_str}: parse error: {e}")
+
+    bins = []
+    for (label, lo, hi, fill), count in zip(bin_defs, counts):
+        bins.append(
+            {
+                "label": label,
+                "low": lo if lo > -99 else None,
+                "high": hi if hi < 999 else None,
+                "count": count,
+                "pct": round(100.0 * count / samples_used, 1) if samples_used else 0,
+                "fill": fill,
+            }
+        )
+
+    most_likely = None
+    if samples_used:
+        mi = max(range(len(bins)), key=lambda i: bins[i]["count"])
+        if bins[mi]["count"] > 0:
+            most_likely = bins[mi]["label"]
+
+    return {
+        "days_back": days_back,
+        "samples_used": samples_used,
+        "bins": bins,
+        "most_likely": most_likely,
+        "avg_humidity": round(humidity_sum / humidity_n, 1) if humidity_n else None,
+        "rain_days": rain_days,
+        "errors": errors,
+    }
+
+
 def extract_detail(forecast_payload: dict) -> dict:
     """Pull the detailed fields the drill-in view needs from a forecast payload.
 
@@ -356,6 +456,7 @@ def extract_summary(forecast_payload: dict) -> dict:
                 "low_f": (d.get("day") or {}).get("mintemp_f"),
                 "rain_chance_pct": (d.get("day") or {}).get("daily_chance_of_rain"),
                 "avg_humidity": (d.get("day") or {}).get("avghumidity"),
+                "max_wind_mph": (d.get("day") or {}).get("maxwind_mph"),
                 "condition": ((d.get("day") or {}).get("condition") or {}).get("text"),
             }
             for d in forecast_days

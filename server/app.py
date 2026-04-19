@@ -16,7 +16,12 @@ Exposes a JSON API consumed by the React frontend:
                                           — hourly forecast + astro + wind for drill-in view
     GET    /api/children/<id>/weather/historical?month=1-12
                                           — historical digest for Future Planning research
-    GET    /api/geocode/search?q=<query>  — WeatherAPI place search proxy
+    GET    /api/children/<id>/weather/distribution
+                                          — recent ~30-day temperature histogram
+    GET    /api/children/<id>/logs        — list user weather logs for a child
+    POST   /api/children/<id>/logs        — record a weather log + snapshot
+    DELETE /api/logs/<id>                 — delete a weather log
+    GET    /api/geocode/search?q=<query>  — Nominatim (OSM) + WeatherAPI fallback
 
     GET    /api/trips                     — list all trip plans with their stops
     POST   /api/trips                     — create a new trip plan
@@ -45,13 +50,14 @@ from flask_migrate import Migrate
 
 from comfort_service import compute_comfort, estimate_bug_risk
 from config import Config
-from models import Bucket, ChildLocation, ParentArea, TripPlan, TripStop, db
+from models import Bucket, ChildLocation, ParentArea, TripPlan, TripStop, WeatherLog, db
 from weather_service import (
     WeatherAPIError,
     extract_detail,
     extract_summary,
     fetch_current_and_forecast,
     fetch_historical_month_digest,
+    fetch_temperature_distribution,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -326,17 +332,86 @@ def create_app(config: type = Config) -> Flask:
 
     @app.route("/api/geocode/search", methods=["GET"])
     def geocode_search():
-        """Location search autocomplete proxy for the 'add location' form.
+        """Location search autocomplete for the 'add location' form.
 
-        Thin passthrough to WeatherAPI's search.json. We proxy server-side so
-        the API key never leaves the backend and so we can add caching later.
-        Returns up to ~10 suggestions with {id, name, region, country, lat, lon}.
+        Primary: Nominatim (OpenStreetMap). It matches not just cities but
+        parks, nature reserves, campgrounds, points of interest — which is
+        what Stephanie actually uses this for ("Orlando Wetlands Park",
+        "Fort De Soto", etc). City-only search was missing most of them.
+
+        Fallback: WeatherAPI.com's search.json, which has fewer POIs but is
+        still a useful safety net if Nominatim is slow/down.
+
+        Returns a normalized shape:
+          [{id, name, region, country, lat, lon, source}]
+        where source is "osm" or "weatherapi". Frontend doesn't need to care.
         """
         q = (request.args.get("q") or "").strip()
         if len(q) < 2:
             return jsonify([])
+
+        results: list[dict] = []
+
+        # --- Primary: Nominatim (OSM) ---
+        # Nominatim's usage policy requires a descriptive User-Agent with
+        # contact info. We identify as Mygration so their ops team can reach
+        # us if there's ever a problem with our traffic pattern.
+        try:
+            osm_resp = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": q,
+                    "format": "jsonv2",
+                    "limit": 10,
+                    "addressdetails": 1,
+                },
+                headers={
+                    "User-Agent": "Mygration/1.0 (stephanie.warner77@gmail.com)",
+                    "Accept-Language": "en",
+                },
+                timeout=8,
+            )
+            if osm_resp.status_code == 200:
+                raw_items = osm_resp.json() or []
+                for i, item in enumerate(raw_items):
+                    try:
+                        lat = float(item.get("lat"))
+                        lon = float(item.get("lon"))
+                    except (TypeError, ValueError):
+                        continue
+                    # Nominatim's display_name is long and comma-separated —
+                    # split it into a short name + "region, country" region
+                    # string so the UI can show e.g. "Orlando Wetlands Park"
+                    # as the headline and the rest as supporting text.
+                    display = item.get("display_name") or ""
+                    parts = [p.strip() for p in display.split(",") if p.strip()]
+                    name = item.get("name") or (parts[0] if parts else q)
+                    addr = item.get("address") or {}
+                    country = addr.get("country") or (parts[-1] if parts else "")
+                    region = (
+                        addr.get("state")
+                        or addr.get("county")
+                        or addr.get("city")
+                        or (parts[1] if len(parts) >= 2 else "")
+                    )
+                    results.append({
+                        "id": f"osm:{item.get('place_id', i)}",
+                        "name": name,
+                        "region": region,
+                        "country": country,
+                        "lat": lat,
+                        "lon": lon,
+                        "source": "osm",
+                    })
+        except requests.RequestException as e:
+            log.warning("Nominatim geocode failed: %s", e)
+
+        if results:
+            return jsonify(results)
+
+        # --- Fallback: WeatherAPI search ---
         if not Config.WEATHER_API_KEY:
-            return {"error": "WEATHER_API_KEY not configured"}, 500
+            return jsonify([])
         try:
             resp = requests.get(
                 f"{Config.WEATHER_API_BASE}/search.json",
@@ -344,11 +419,21 @@ def create_app(config: type = Config) -> Flask:
                 timeout=8,
             )
         except requests.RequestException as e:
-            log.warning("Geocode search failed: %s", e)
-            return {"error": str(e)}, 502
+            log.warning("Geocode search fallback failed: %s", e)
+            return jsonify([])
         if resp.status_code != 200:
-            return {"error": f"WeatherAPI search returned {resp.status_code}"}, 502
-        return jsonify(resp.json())
+            return jsonify([])
+        for item in resp.json() or []:
+            results.append({
+                "id": f"wapi:{item.get('id')}",
+                "name": item.get("name") or "",
+                "region": item.get("region") or "",
+                "country": item.get("country") or "",
+                "lat": item.get("lat"),
+                "lon": item.get("lon"),
+                "source": "weatherapi",
+            })
+        return jsonify(results)
 
     @app.route("/api/children/<int:child_id>/weather/historical", methods=["GET"])
     def child_weather_historical(child_id: int):
@@ -376,6 +461,119 @@ def create_app(config: type = Config) -> Flask:
             return {"error": str(e)}, 502
         digest["child"] = child.to_dict()
         return jsonify(digest)
+
+    @app.route("/api/children/<int:child_id>/weather/distribution", methods=["GET"])
+    def child_weather_distribution(child_id: int):
+        """Histogram of daily high temps over the last ~30 days.
+
+        Powers the "Temperature Distribution" card in the detail view — gives
+        a sense of the *shape* of the weather, not just averages. e.g. "70%
+        of recent days were 80–89°F" tells Stephanie what to actually pack
+        and plan for, rather than the average hiding the variance.
+        """
+        child = ChildLocation.query.get_or_404(child_id)
+        try:
+            dist = fetch_temperature_distribution(child)
+        except WeatherAPIError as e:
+            log.warning("Distribution fetch failed for child %s: %s", child_id, e)
+            return {"error": str(e)}, 502
+        return jsonify(dist)
+
+    # -------------------------- Weather Logs ----------------------------------
+    #
+    # User-submitted "what was today actually like" entries. Stored alongside
+    # an optional snapshot of the live weather at submit time, so we can later
+    # learn how Stephanie's lived experience diverges from the comfort score.
+
+    @app.route("/api/children/<int:child_id>/logs", methods=["GET"])
+    def list_child_logs(child_id: int):
+        """All weather logs for a child, newest first."""
+        child = ChildLocation.query.get_or_404(child_id)
+        logs = (
+            WeatherLog.query.filter_by(child_location_id=child.id)
+            .order_by(WeatherLog.logged_at.desc())
+            .all()
+        )
+        return jsonify([log_row.to_dict() for log_row in logs])
+
+    @app.route("/api/children/<int:child_id>/logs", methods=["POST"])
+    def create_child_log(child_id: int):
+        """Record a weather log for today.
+
+        Body:
+          { temp_rating, humidity_rating, bug_rating, note }
+          ratings are one of "up" | "neutral" | "down" (or omitted/null).
+
+        Optionally captures a snapshot of the live forecast/comfort numbers
+        at submit time so we can correlate Stephanie's ratings against what
+        the model predicted. If WeatherAPI is unavailable the log still saves
+        — the snapshot is best-effort.
+        """
+        import json as _json
+
+        child = ChildLocation.query.get_or_404(child_id)
+        data = request.get_json(force=True, silent=True) or {}
+
+        def _norm_rating(v):
+            if v is None or v == "":
+                return None
+            v = str(v).strip().lower()
+            return v if v in WeatherLog.RATING_VALUES else None
+
+        # Best-effort snapshot. Don't block the save if it fails.
+        snapshot = None
+        try:
+            raw = fetch_current_and_forecast(child)
+            summary = extract_summary(raw)
+            current = summary.get("current") or {}
+            today = summary.get("today") or {}
+            comfort_dict = None
+            bug = None
+            if (
+                current.get("temp_f") is not None
+                and current.get("humidity") is not None
+            ):
+                comfort_dict = compute_comfort(
+                    temp_f=current["temp_f"],
+                    humidity_pct=current["humidity"],
+                    rain_chance_pct=today.get("rain_chance_pct") or 0,
+                    wind_mph=current.get("wind_mph") or 0,
+                ).to_dict()
+                bug = estimate_bug_risk(
+                    temp_f=current["temp_f"],
+                    humidity_pct=current["humidity"],
+                    recent_rain_inches=today.get("total_precip_in") or 0,
+                )
+            snapshot = {
+                "temp_f": current.get("temp_f"),
+                "humidity": current.get("humidity"),
+                "wind_mph": current.get("wind_mph"),
+                "condition": current.get("condition"),
+                "rain_chance_pct": today.get("rain_chance_pct"),
+                "comfort": comfort_dict,
+                "bug_risk": bug,
+            }
+        except Exception as e:  # noqa: BLE001 — snapshot is optional
+            log.info("Snapshot capture failed for log on child %s: %s", child_id, e)
+
+        entry = WeatherLog(
+            child_location_id=child.id,
+            temp_rating=_norm_rating(data.get("temp_rating")),
+            humidity_rating=_norm_rating(data.get("humidity_rating")),
+            bug_rating=_norm_rating(data.get("bug_rating")),
+            note=(data.get("note") or "").strip() or None,
+            weather_snapshot_json=_json.dumps(snapshot) if snapshot else None,
+        )
+        db.session.add(entry)
+        db.session.commit()
+        return jsonify(entry.to_dict()), 201
+
+    @app.route("/api/logs/<int:log_id>", methods=["DELETE"])
+    def delete_log(log_id: int):
+        entry = WeatherLog.query.get_or_404(log_id)
+        db.session.delete(entry)
+        db.session.commit()
+        return "", 204
 
     # -------------------------- Trip Planner ----------------------------------
     #

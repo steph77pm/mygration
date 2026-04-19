@@ -280,9 +280,71 @@ class TripStop(db.Model):
         }
 
 
+class WeatherLog(db.Model):
+    """User's subjective rating of how a location actually felt.
+
+    Prototype shape: three per-factor 3-way ratings (temp / humidity / bugs)
+    plus an optional free-text note. We also freeze a snapshot of the
+    weather conditions *at the moment of logging* so later analysis can
+    compare "what the algorithm said" vs "what Stephanie felt". That
+    snapshot is the ground truth for any future learning/correction-factor
+    loop.
+
+    Multiple logs per day per location is fine — the timestamp captures the
+    time-of-day context (morning walkout vs afternoon heat). No uniqueness
+    constraint.
+    """
+
+    __tablename__ = "weather_logs"
+
+    # Accepted rating values. Kept as a plain CHECK-style string column
+    # rather than an Enum so we can evolve the shape (e.g., add a "bad_bug"
+    # value) without a migration.
+    RATING_VALUES = ("up", "neutral", "down")
+
+    id = db.Column(db.Integer, primary_key=True)
+    child_location_id = db.Column(
+        db.Integer,
+        db.ForeignKey("child_locations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    logged_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    temp_rating = db.Column(db.String(16), nullable=True)
+    humidity_rating = db.Column(db.String(16), nullable=True)
+    bug_rating = db.Column(db.String(16), nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    # JSON snapshot of the current-conditions payload at the moment of
+    # logging. Null if snapshot failed (e.g., offline, cache stale) — we
+    # still accept the log in that case because the subjective input is the
+    # primary signal.
+    weather_snapshot_json = db.Column(db.Text, nullable=True)
+
+    def to_dict(self) -> dict:
+        import json
+
+        snapshot = None
+        if self.weather_snapshot_json:
+            try:
+                snapshot = json.loads(self.weather_snapshot_json)
+            except (ValueError, TypeError):
+                snapshot = None
+        return {
+            "id": self.id,
+            "child_location_id": self.child_location_id,
+            "logged_at": self.logged_at.isoformat() if self.logged_at else None,
+            "temp_rating": self.temp_rating,
+            "humidity_rating": self.humidity_rating,
+            "bug_rating": self.bug_rating,
+            "note": self.note,
+            "weather_snapshot": snapshot,
+        }
+
+
 # --- Phase 2+ models sketched out for future migrations ----------------------
 #
-# class ComfortLog(db.Model): ...
 # class ParkingSpot(db.Model): ...
 # class NearbyAmenity(db.Model): ...
 # class NatureTag(db.Model): ...

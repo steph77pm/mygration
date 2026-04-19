@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { usePersistedState } from '../hooks/usePersistedState.js'
 import { useLocationsStore } from '../hooks/useLocationsStore.jsx'
 import { useSelectedChild } from '../hooks/useSelectedChild.jsx'
 import { ComfortBadge } from './ComfortBadge.jsx'
@@ -34,11 +33,10 @@ import {
 export function LocationBucket({ bucketKey, title, areas }) {
   const { openAddParent } = useLocationsStore()
 
-  // Layout toggle — persist per-bucket. Watching bucket ignores this.
-  const [layout, setLayout] = usePersistedState(
-    `mygration.bucket.${bucketKey}.layout`,
-    'card'
-  )
+  // Layout toggle — always starts on Cards each session. Toggle to Table
+  // stays in effect until reload. (Persisted-across-reloads was confusing:
+  // Stephanie wanted Cards to be the front door every time.)
+  const [layout, setLayout] = useState('card')
 
   // Flatten parent→child into a list of child-with-parent-name so the
   // card/table loops don't have to nest.
