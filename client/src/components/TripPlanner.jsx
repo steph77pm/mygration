@@ -332,6 +332,7 @@ function TrackPanel({
           stops={stops}
           trackColor={track.color}
           refresh={refresh}
+          weatherByStop={weatherByStop}
           onEditStop={onEditStop}
           onAddStop={onAddStop}
           onExitCalendar={() => setViewMode('list')}
@@ -352,8 +353,7 @@ function StopTimelineCard({
   onMoveUp,
   onMoveDown,
 }) {
-  const comfortScore = weather?.comfort?.composite
-  const tempLabel = weather?.temp_f != null ? `${Math.round(weather.temp_f)}°F` : null
+  const { tempLabel, comfortScore, bugRisk, isRange } = summarizeWeather(weather)
   const humidityLabel =
     weather?.humidity != null ? `${Math.round(weather.humidity)}% humidity` : null
   const alertTags = buildAlertTags(weather)
@@ -389,7 +389,12 @@ function StopTimelineCard({
       )}
       <div className="stop-details">
         {tempLabel ? (
-          <span className="stop-stat">{tempLabel}</span>
+          <span
+            className="stop-stat"
+            title={isRange ? 'Low–High across this stop' : undefined}
+          >
+            {tempLabel}
+          </span>
         ) : weather?.mode === 'error' ? (
           <span className="stop-stat" style={{ color: '#64748b' }}>
             Weather unavailable
@@ -400,7 +405,7 @@ function StopTimelineCard({
           </span>
         )}
         {humidityLabel && <span className="stop-stat">{humidityLabel}</span>}
-        {weather?.bug_risk && <BugInd level={weather.bug_risk} />}
+        {bugRisk && <BugInd level={bugRisk} />}
       </div>
       {alertTags.length > 0 && (
         <div className="stop-alerts">
@@ -426,8 +431,7 @@ function StopListRow({
   onMoveUp,
   onMoveDown,
 }) {
-  const comfortScore = weather?.comfort?.composite
-  const tempLabel = weather?.temp_f != null ? `${Math.round(weather.temp_f)}°F` : null
+  const { tempLabel, comfortScore, bugRisk, isRange } = summarizeWeather(weather)
   const alertTags = buildAlertTags(weather)
 
   return (
@@ -442,14 +446,16 @@ function StopListRow({
       </div>
       <div className="list-stop-weather">
         {tempLabel ? (
-          <span>{tempLabel}</span>
+          <span title={isRange ? 'Low–High across this stop' : undefined}>
+            {tempLabel}
+          </span>
         ) : (
           <span style={{ color: '#64748b' }}>—</span>
         )}
         {comfortScore != null && <ComfortBadge score={comfortScore} size={28} />}
       </div>
       <div className="list-stop-flags">
-        {weather?.bug_risk && <BugInd level={weather.bug_risk} />}
+        {bugRisk && <BugInd level={bugRisk} />}
         {alertTags.map((t, i) => (
           <span key={i} className={`alert-tag ${t.cls}`}>
             {t.label}
@@ -511,6 +517,55 @@ function StopRowActions({ isFirst, isLast, onEdit, onDelete, onMoveUp, onMoveDow
       </button>
     </div>
   )
+}
+
+/**
+ * Summarize a multi-day stop's weather from its `days` array (per-day
+ * forecast coming from the backend). Returns the high–low range, the
+ * lowest comfort score, and the worst bug risk across the span. Falls
+ * back to the single-point fields on the weather payload (temp_f,
+ * comfort.composite, bug_risk) when the stop isn't dated or only has
+ * one day of forecast. Also produces a tempLabel string ready to
+ * render: `68–78°F` for multi-day, `72°F` for single-day.
+ */
+function summarizeWeather(weather) {
+  const out = {
+    tempLabel: null,
+    comfortScore: weather?.comfort?.composite,
+    bugRisk: weather?.bug_risk || null,
+    isRange: false,
+  }
+  const days = (weather?.days || []).filter((d) => d && d.temp_f_high != null)
+  if (days.length >= 2) {
+    const highs = days.map((d) => d.temp_f_high)
+    const lows = days
+      .map((d) => d.temp_f_low)
+      .filter((v) => v != null)
+    const hi = Math.max(...highs)
+    const lo = lows.length ? Math.min(...lows) : Math.min(...highs)
+    out.tempLabel = `${Math.round(lo)}–${Math.round(hi)}°F`
+    out.isRange = true
+    // Worst (lowest) comfort score across the range
+    const scores = days
+      .map((d) => d?.comfort?.composite)
+      .filter((v) => v != null)
+    if (scores.length) out.comfortScore = Math.min(...scores)
+    // Worst bug risk across the range
+    const rank = { low: 0, moderate: 1, high: 2, severe: 3 }
+    let worstBug = null
+    for (const d of days) {
+      if (!d.bug_risk) continue
+      if (worstBug === null || (rank[d.bug_risk] ?? -1) > (rank[worstBug] ?? -1)) {
+        worstBug = d.bug_risk
+      }
+    }
+    if (worstBug) out.bugRisk = worstBug
+  } else if (days.length === 1) {
+    out.tempLabel = `${Math.round(days[0].temp_f_high)}°F`
+  } else if (weather?.temp_f != null) {
+    out.tempLabel = `${Math.round(weather.temp_f)}°F`
+  }
+  return out
 }
 
 /** Bug indicator chip. Same look as the dashboard card version. */
@@ -587,7 +642,35 @@ function formatDateRange(start, end) {
 
 let _calendarDrag = null // { stopId, srcIso | null, startIso | null, endIso | null }
 
-function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop, onExitCalendar }) {
+function CalendarView({
+  stops,
+  trackColor,
+  refresh,
+  weatherByStop,
+  onEditStop,
+  onAddStop,
+  onExitCalendar,
+}) {
+  // ISO → { temp_f (rounded high), low_f } lookup, aggregated across every
+  // stop's per-day forecast. First stop wins if two stops happen to cover
+  // the same day (rare — would require overlapping date ranges).
+  const dayTempByIso = (() => {
+    const m = {}
+    for (const s of stops) {
+      const w = weatherByStop?.[s.id]
+      if (!w?.days) continue
+      for (const d of w.days) {
+        if (!d?.date || d.temp_f_high == null) continue
+        if (m[d.date]) continue
+        m[d.date] = {
+          temp_f: d.temp_f_high,
+          low_f: d.temp_f_low,
+        }
+      }
+    }
+    return m
+  })()
+
   const today = new Date()
   const initialMonth = (() => {
     // Prefer the month of the earliest dated stop if any, else today.
@@ -765,7 +848,21 @@ function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop, onExi
                       handleDropOnCell(iso)
                     }}
                   >
-                    <div className="calendar-cell-date">{day.getDate()}</div>
+                    <div className="calendar-cell-head">
+                      <span className="calendar-cell-date">{day.getDate()}</span>
+                      {dayTempByIso[iso] && (
+                        <span
+                          className="calendar-cell-temp"
+                          title={
+                            dayTempByIso[iso].low_f != null
+                              ? `High ${Math.round(dayTempByIso[iso].temp_f)}°F · Low ${Math.round(dayTempByIso[iso].low_f)}°F`
+                              : `${Math.round(dayTempByIso[iso].temp_f)}°F`
+                          }
+                        >
+                          {Math.round(dayTempByIso[iso].temp_f)}°
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )
               })}

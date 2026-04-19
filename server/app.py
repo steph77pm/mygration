@@ -954,6 +954,54 @@ def create_app(config: type = Config) -> Flask:
                 "extended_cold_days": alerts.get("extended_cold_days") or 0,
                 "native": alerts.get("native") or [],
             }
+
+            # Per-day breakdown for dated stops: one dict per day in the
+            # stop's [start_date, end_date] range that also falls inside the
+            # forecast window. Used by Calendar (show temp per cell) and List
+            # (range summary for multi-day stops). Days outside the forecast
+            # horizon are simply not included — frontend shows nothing for
+            # those cells.
+            days_in_range: list[dict] = []
+            if stop.start_date:
+                fd_by_iso = {d.get("date"): d for d in forecast_days if d.get("date")}
+                span_start = max(stop.start_date, today)
+                span_end = min(stop.end_date or stop.start_date, forecast_window_end)
+                cursor_d = span_start
+                while cursor_d <= span_end:
+                    d_raw = fd_by_iso.get(cursor_d.isoformat())
+                    if d_raw is not None:
+                        d_high = d_raw.get("high_f")
+                        d_low = d_raw.get("low_f")
+                        d_humidity = d_raw.get("avg_humidity")
+                        d_rain = d_raw.get("rain_chance_pct") or 0
+                        d_comfort = None
+                        d_bug = None
+                        if d_high is not None and d_humidity is not None:
+                            _c = compute_comfort(
+                                temp_f=d_high,
+                                humidity_pct=d_humidity,
+                                rain_chance_pct=d_rain,
+                                wind_mph=0,
+                            )
+                            d_comfort = _c.to_dict()
+                            d_bug = estimate_bug_risk(
+                                temp_f=d_high,
+                                humidity_pct=d_humidity,
+                                recent_rain_inches=0,
+                            )
+                        days_in_range.append({
+                            "date": cursor_d.isoformat(),
+                            "temp_f_high": d_high,
+                            "temp_f_low": d_low,
+                            "humidity": d_humidity,
+                            "rain_chance_pct": d_rain,
+                            "condition": d_raw.get("condition"),
+                            "comfort": d_comfort,
+                            "bug_risk": d_bug,
+                        })
+                    cursor_d = cursor_d + _td(days=1)
+            entry["days"] = days_in_range
+
             out_stops.append(entry)
 
         # Trip-level summary: avg comfort, worst bug, any warnings flag.

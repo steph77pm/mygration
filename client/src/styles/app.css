@@ -1530,6 +1530,13 @@ body {
   border-color: rgba(59, 130, 246, 0.7);
 }
 
+.calendar-cell-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1;
+}
 .calendar-cell-date {
   font-size: 11px;
   color: #94a3b8;
@@ -1538,6 +1545,13 @@ body {
 }
 .calendar-cell.today .calendar-cell-date {
   color: #60a5fa;
+}
+.calendar-cell-temp {
+  font-size: 10px;
+  color: #cbd5e1;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 /* Bar overlay: same grid template as .calendar-week so columns align.
