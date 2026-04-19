@@ -25,6 +25,7 @@ export function TripPlanner() {
   const {
     trips,
     error,
+    refresh,
     openAddTrip,
     openEditTrip,
     openAddStop,
@@ -68,6 +69,13 @@ export function TripPlanner() {
               onClick={() => setViewMode('list')}
             >
               List
+            </button>
+            <button
+              type="button"
+              className={`toggle-btn ${viewMode === 'calendar' ? 'active' : ''}`}
+              onClick={() => setViewMode('calendar')}
+            >
+              Calendar
             </button>
           </div>
           <div className="toggle-group" role="tablist" aria-label="Compare">
@@ -118,6 +126,7 @@ export function TripPlanner() {
                 key={track.id}
                 track={track}
                 viewMode={viewMode}
+                refresh={refresh}
                 onEditTrack={() => openEditTrip(track)}
                 onDeleteTrack={() => deleteTrip(track)}
                 onAddStop={() => openAddStop(track.id, track.name)}
@@ -210,6 +219,7 @@ function TrackSummary({ track }) {
 function TrackPanel({
   track,
   viewMode,
+  refresh,
   onEditTrack,
   onDeleteTrack,
   onAddStop,
@@ -293,7 +303,7 @@ function TrackPanel({
             + Add Stop
           </button>
         </>
-      ) : (
+      ) : viewMode === 'list' ? (
         <>
           {stops.map((s, i) => (
             <StopListRow
@@ -313,6 +323,14 @@ function TrackPanel({
             + Add Stop
           </button>
         </>
+      ) : (
+        <CalendarView
+          stops={stops}
+          trackColor={track.color}
+          refresh={refresh}
+          onEditStop={onEditStop}
+          onAddStop={onAddStop}
+        />
       )}
     </div>
   )
@@ -544,4 +562,303 @@ function formatDateRange(start, end) {
   if (start && !end) return `${fmt(start)}+`
   if (!start && end) return `by ${fmt(end)}`
   return `${fmt(start)} – ${fmt(end)}`
+}
+
+// ---------------------------------------------------------------------------
+// Calendar view
+//
+// Month-grid drag-and-drop for assigning/shifting stop dates. Stops with no
+// dates live in a tray at the top; drag them onto a day to give them a date.
+// Stops with dates render as chips on every day they cover (a 3-day stop
+// shows on 3 cells). Dragging a chip and dropping on another day shifts the
+// whole stop by (drop − source), preserving duration. Dropping on the tray
+// clears both start_date and end_date.
+//
+// We hold a module-level drag payload as a fallback because
+// dataTransfer.getData() isn't readable during dragover (only drop), which
+// means we can't style drop targets without this. Set on dragstart, cleared
+// on dragend.
+// ---------------------------------------------------------------------------
+
+let _calendarDrag = null // { stopId, srcIso | null, startIso | null, endIso | null }
+
+function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop }) {
+  const today = new Date()
+  const initialMonth = (() => {
+    // Prefer the month of the earliest dated stop if any, else today.
+    const dated = stops.filter((s) => s.start_date).map((s) => s.start_date).sort()
+    if (dated.length) {
+      const [y, m] = dated[0].split('-').map(Number)
+      return new Date(y, m - 1, 1)
+    }
+    return new Date(today.getFullYear(), today.getMonth(), 1)
+  })()
+  const [cursor, setCursor] = useState(initialMonth)
+  const [dropTargetIso, setDropTargetIso] = useState(null) // day cell currently hovered
+  const [trayHover, setTrayHover] = useState(false)
+
+  const grid = buildMonthGrid(cursor) // 42 date objects
+  const todayIso = isoLocal(today)
+
+  // Undated stops → tray
+  const tray = stops.filter((s) => !s.start_date && !s.end_date)
+
+  async function shiftStop(stopId, patch) {
+    try {
+      await api.updateStop(stopId, patch)
+      await refresh()
+    } catch (e) {
+      window.alert(`Update failed: ${e.message}`)
+    }
+  }
+
+  function handleDropOnCell(dropIso) {
+    const p = _calendarDrag
+    _calendarDrag = null
+    setDropTargetIso(null)
+    if (!p) return
+    // Tray → just anchor on dropIso (single-day stop).
+    if (!p.startIso && !p.endIso) {
+      shiftStop(p.stopId, { start_date: dropIso, end_date: dropIso })
+      return
+    }
+    // Dated → shift by (dropIso − srcIso). If srcIso missing, anchor at start.
+    const src = p.srcIso || p.startIso
+    const delta = daysBetween(src, dropIso)
+    const newStart = p.startIso ? addDaysIso(p.startIso, delta) : dropIso
+    const newEnd = p.endIso ? addDaysIso(p.endIso, delta) : newStart
+    // No-op: same dates
+    if (newStart === p.startIso && newEnd === p.endIso) return
+    shiftStop(p.stopId, { start_date: newStart, end_date: newEnd })
+  }
+
+  function handleDropOnTray() {
+    const p = _calendarDrag
+    _calendarDrag = null
+    setTrayHover(false)
+    if (!p) return
+    if (!p.startIso && !p.endIso) return // already undated
+    shiftStop(p.stopId, { start_date: null, end_date: null })
+  }
+
+  return (
+    <div className="calendar-view">
+      <div
+        className={`calendar-tray ${trayHover ? 'drop-hover' : ''}`}
+        onDragOver={(e) => {
+          if (!_calendarDrag) return
+          e.preventDefault()
+          setTrayHover(true)
+        }}
+        onDragLeave={() => setTrayHover(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          handleDropOnTray()
+        }}
+      >
+        <span className="calendar-tray-label">Undated</span>
+        <div className="calendar-tray-stops">
+          {tray.length === 0 ? (
+            <span className="calendar-tray-empty">Drop a stop here to clear its dates</span>
+          ) : (
+            tray.map((s) => (
+              <CalendarStopChip
+                key={s.id}
+                stop={s}
+                trackColor={trackColor}
+                srcIso={null}
+                onEditStop={onEditStop}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="calendar-header">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => setCursor(addMonths(cursor, -1))}
+          aria-label="Previous month"
+          title="Previous month"
+        >
+          ‹
+        </button>
+        <div className="calendar-month-label">{formatMonth(cursor)}</div>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => setCursor(addMonths(cursor, 1))}
+          aria-label="Next month"
+          title="Next month"
+        >
+          ›
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost calendar-today-btn"
+          onClick={() => setCursor(new Date(today.getFullYear(), today.getMonth(), 1))}
+        >
+          Today
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost track-add-stop"
+          onClick={onAddStop}
+          style={{ marginLeft: 'auto' }}
+        >
+          + Add Stop
+        </button>
+      </div>
+
+      <div className="calendar-dow">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div key={d} className="calendar-dow-cell">{d}</div>
+        ))}
+      </div>
+
+      <div className="calendar-grid">
+        {grid.map((day) => {
+          const iso = isoLocal(day)
+          const inMonth = day.getMonth() === cursor.getMonth()
+          const isToday = iso === todayIso
+          const cellStops = stopsOn(iso, stops)
+          return (
+            <div
+              key={iso}
+              className={`calendar-cell ${inMonth ? 'current-month' : 'other-month'} ${
+                isToday ? 'today' : ''
+              } ${dropTargetIso === iso ? 'drop-hover' : ''}`}
+              onDragOver={(e) => {
+                if (!_calendarDrag) return
+                e.preventDefault()
+                if (dropTargetIso !== iso) setDropTargetIso(iso)
+              }}
+              onDragLeave={() => {
+                if (dropTargetIso === iso) setDropTargetIso(null)
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                handleDropOnCell(iso)
+              }}
+            >
+              <div className="calendar-cell-date">{day.getDate()}</div>
+              <div className="calendar-cell-stops">
+                {cellStops.map((s) => (
+                  <CalendarStopChip
+                    key={s.id}
+                    stop={s}
+                    trackColor={trackColor}
+                    srcIso={iso}
+                    onEditStop={onEditStop}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function CalendarStopChip({ stop, trackColor, srcIso, onEditStop }) {
+  return (
+    <div
+      className="calendar-stop-chip"
+      style={{ background: trackColor }}
+      draggable
+      onDragStart={(e) => {
+        _calendarDrag = {
+          stopId: stop.id,
+          srcIso,
+          startIso: stop.start_date || null,
+          endIso: stop.end_date || null,
+        }
+        // Also stash in dataTransfer so something is attached (required in FF).
+        try {
+          e.dataTransfer.setData('text/plain', String(stop.id))
+          e.dataTransfer.effectAllowed = 'move'
+        } catch {
+          /* ignore */
+        }
+      }}
+      onDragEnd={() => {
+        _calendarDrag = null
+      }}
+      onDoubleClick={() => onEditStop(stop)}
+      title={`${stop.name} — double-click to edit`}
+    >
+      {stop.name}
+    </div>
+  )
+}
+
+// --- Calendar helpers ------------------------------------------------------
+
+/** '2026-04-18' from a Date, using local time (not UTC). */
+function isoLocal(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Parse 'YYYY-MM-DD' at local midnight. */
+function parseIso(iso) {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function addDaysIso(iso, delta) {
+  const d = parseIso(iso)
+  d.setDate(d.getDate() + delta)
+  return isoLocal(d)
+}
+
+function daysBetween(fromIso, toIso) {
+  const from = parseIso(fromIso).getTime()
+  const to = parseIso(toIso).getTime()
+  return Math.round((to - from) / 86400000)
+}
+
+function addMonths(date, delta) {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1)
+}
+
+function formatMonth(date) {
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+}
+
+/**
+ * 6-week (42-cell) grid starting on Sunday, buffered with prev/next month
+ * days as needed. Matches Google Calendar's month view.
+ */
+function buildMonthGrid(cursor) {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
+  const startOffset = first.getDay() // 0=Sun
+  const gridStart = new Date(first)
+  gridStart.setDate(first.getDate() - startOffset)
+  const cells = []
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(gridStart)
+    d.setDate(gridStart.getDate() + i)
+    cells.push(d)
+  }
+  return cells
+}
+
+/**
+ * Return stops whose [start_date, end_date] inclusive range covers iso.
+ * - Both dates set → span match.
+ * - Only start → single-day at start.
+ * - Only end → single-day at end.
+ */
+function stopsOn(iso, stops) {
+  return stops.filter((s) => {
+    if (!s.start_date && !s.end_date) return false
+    const start = s.start_date || s.end_date
+    const end = s.end_date || s.start_date
+    return iso >= start && iso <= end
+  })
 }
