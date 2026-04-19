@@ -1418,6 +1418,15 @@ body {
   padding: 4px 0 8px;
 }
 
+.calendar-exit-row {
+  display: flex;
+  align-items: center;
+}
+.calendar-exit-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .calendar-tray {
   border: 1px dashed rgba(148, 163, 184, 0.35);
   border-radius: 10px;

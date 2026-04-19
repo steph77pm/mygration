@@ -126,6 +126,7 @@ export function TripPlanner() {
                 key={track.id}
                 track={track}
                 viewMode={viewMode}
+                setViewMode={setViewMode}
                 refresh={refresh}
                 onEditTrack={() => openEditTrip(track)}
                 onDeleteTrack={() => deleteTrip(track)}
@@ -219,6 +220,7 @@ function TrackSummary({ track }) {
 function TrackPanel({
   track,
   viewMode,
+  setViewMode,
   refresh,
   onEditTrack,
   onDeleteTrack,
@@ -253,15 +255,17 @@ function TrackPanel({
           >
             ✎
           </button>
-          <button
-            type="button"
-            className="icon-btn icon-btn-danger"
-            onClick={onDeleteTrack}
-            aria-label={`Delete ${track.name}`}
-            title="Delete track"
-          >
-            ×
-          </button>
+          {viewMode !== 'calendar' && (
+            <button
+              type="button"
+              className="icon-btn icon-btn-danger"
+              onClick={onDeleteTrack}
+              aria-label={`Delete ${track.name}`}
+              title="Delete track"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
 
@@ -330,6 +334,7 @@ function TrackPanel({
           refresh={refresh}
           onEditStop={onEditStop}
           onAddStop={onAddStop}
+          onExitCalendar={() => setViewMode('list')}
         />
       )}
     </div>
@@ -582,7 +587,7 @@ function formatDateRange(start, end) {
 
 let _calendarDrag = null // { stopId, srcIso | null, startIso | null, endIso | null }
 
-function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop }) {
+function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop, onExitCalendar }) {
   const today = new Date()
   const initialMonth = (() => {
     // Prefer the month of the earliest dated stop if any, else today.
@@ -672,6 +677,17 @@ function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop }) {
             ))
           )}
         </div>
+      </div>
+
+      <div className="calendar-exit-row">
+        <button
+          type="button"
+          className="btn btn-ghost calendar-exit-btn"
+          onClick={onExitCalendar}
+          title="Back to List view"
+        >
+          ← Back to List
+        </button>
       </div>
 
       <div className="calendar-header">
