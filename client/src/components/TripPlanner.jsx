@@ -733,41 +733,77 @@ function CalendarView({ stops, trackColor, refresh, onEditStop, onAddStop, onExi
         ))}
       </div>
 
-      <div className="calendar-grid">
-        {grid.map((day) => {
-          const iso = isoLocal(day)
-          const inMonth = day.getMonth() === cursor.getMonth()
-          const isToday = iso === todayIso
-          const cellStops = stopsOn(iso, stops)
+      <div className={`calendar-grid ${_calendarDrag ? 'dragging' : ''}`}>
+        {[0, 1, 2, 3, 4, 5].map((wi) => {
+          const week = grid.slice(wi * 7, wi * 7 + 7)
+          const segments = segmentsForWeek(week, stops)
+          const laneCount = segments.reduce((m, s) => Math.max(m, s.lane + 1), 0)
+          // Date label 22px + lane rows (18px each + 2px gap) + 6px bottom.
+          const minCellHeight = Math.max(64, 28 + laneCount * 20 + 6)
           return (
-            <div
-              key={iso}
-              className={`calendar-cell ${inMonth ? 'current-month' : 'other-month'} ${
-                isToday ? 'today' : ''
-              } ${dropTargetIso === iso ? 'drop-hover' : ''}`}
-              onDragOver={(e) => {
-                if (!_calendarDrag) return
-                e.preventDefault()
-                if (dropTargetIso !== iso) setDropTargetIso(iso)
-              }}
-              onDragLeave={() => {
-                if (dropTargetIso === iso) setDropTargetIso(null)
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                handleDropOnCell(iso)
-              }}
-            >
-              <div className="calendar-cell-date">{day.getDate()}</div>
-              <div className="calendar-cell-stops">
-                {cellStops.map((s) => (
-                  <CalendarStopChip
-                    key={s.id}
-                    stop={s}
-                    trackColor={trackColor}
-                    srcIso={iso}
-                    onEditStop={onEditStop}
-                  />
+            <div key={wi} className="calendar-week" style={{ minHeight: minCellHeight }}>
+              {week.map((day) => {
+                const iso = isoLocal(day)
+                const inMonth = day.getMonth() === cursor.getMonth()
+                const isToday = iso === todayIso
+                return (
+                  <div
+                    key={iso}
+                    className={`calendar-cell ${inMonth ? 'current-month' : 'other-month'} ${
+                      isToday ? 'today' : ''
+                    } ${dropTargetIso === iso ? 'drop-hover' : ''}`}
+                    onDragOver={(e) => {
+                      if (!_calendarDrag) return
+                      e.preventDefault()
+                      if (dropTargetIso !== iso) setDropTargetIso(iso)
+                    }}
+                    onDragLeave={() => {
+                      if (dropTargetIso === iso) setDropTargetIso(null)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      handleDropOnCell(iso)
+                    }}
+                  >
+                    <div className="calendar-cell-date">{day.getDate()}</div>
+                  </div>
+                )
+              })}
+              <div className="calendar-week-bars">
+                {segments.map((seg) => (
+                  <div
+                    key={`${seg.stop.id}-${wi}`}
+                    className={`calendar-stop-bar ${seg.cutLeft ? 'cut-left' : ''} ${
+                      seg.cutRight ? 'cut-right' : ''
+                    }`}
+                    style={{
+                      background: trackColor,
+                      gridColumn: `${seg.startCol + 1} / span ${seg.span}`,
+                      gridRow: seg.lane + 1,
+                    }}
+                    draggable
+                    onDragStart={(e) => {
+                      _calendarDrag = {
+                        stopId: seg.stop.id,
+                        srcIso: null,
+                        startIso: seg.stop.start_date || null,
+                        endIso: seg.stop.end_date || null,
+                      }
+                      try {
+                        e.dataTransfer.setData('text/plain', String(seg.stop.id))
+                        e.dataTransfer.effectAllowed = 'move'
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    onDragEnd={() => {
+                      _calendarDrag = null
+                    }}
+                    onDoubleClick={() => onEditStop(seg.stop)}
+                    title={`${seg.stop.name} — double-click to edit`}
+                  >
+                    <span className="calendar-stop-bar-label">{seg.stop.name}</span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -865,16 +901,60 @@ function buildMonthGrid(cursor) {
 }
 
 /**
- * Return stops whose [start_date, end_date] inclusive range covers iso.
- * - Both dates set → span match.
- * - Only start → single-day at start.
- * - Only end → single-day at end.
+ * Given a week (array of 7 Date objects, Sun–Sat) and the full stops list,
+ * return segment descriptors for every stop that overlaps this week.
+ *
+ * A multi-week stop produces one segment per week it appears in. Each
+ * segment reports the column it starts on (0=Sun), how many columns it
+ * spans, and a "lane" index so the caller can stack overlapping stops
+ * vertically without collisions. `cutLeft`/`cutRight` flag segments that
+ * are continuations of a stop that started before this week (or extends
+ * past the end), so the bar can render with a flat edge instead of a
+ * rounded one.
+ *
+ * Lane algorithm: greedy — sort by start date ascending (longer first as
+ * tiebreaker), then assign each segment the lowest-index lane whose
+ * most-recent span has already ended.
  */
-function stopsOn(iso, stops) {
-  return stops.filter((s) => {
+function segmentsForWeek(week, stops) {
+  const weekStart = isoLocal(week[0])
+  const weekEnd = isoLocal(week[6])
+  const overlapping = stops.filter((s) => {
     if (!s.start_date && !s.end_date) return false
-    const start = s.start_date || s.end_date
-    const end = s.end_date || s.start_date
-    return iso >= start && iso <= end
+    const sStart = s.start_date || s.end_date
+    const sEnd = s.end_date || s.start_date
+    return sStart <= weekEnd && sEnd >= weekStart
   })
+  overlapping.sort((a, b) => {
+    const aStart = a.start_date || a.end_date
+    const bStart = b.start_date || b.end_date
+    if (aStart !== bStart) return aStart.localeCompare(bStart)
+    // Longer bars first so they claim the lowest lane; keeps visuals tidy.
+    const aEnd = a.end_date || a.start_date
+    const bEnd = b.end_date || b.start_date
+    return bEnd.localeCompare(aEnd)
+  })
+  const lanes = [] // each entry: last-used-column-end (exclusive)
+  const out = []
+  for (const s of overlapping) {
+    const sStart = s.start_date || s.end_date
+    const sEnd = s.end_date || s.start_date
+    const segStartIso = sStart < weekStart ? weekStart : sStart
+    const segEndIso = sEnd > weekEnd ? weekEnd : sEnd
+    const startCol = daysBetween(weekStart, segStartIso)
+    const span = daysBetween(segStartIso, segEndIso) + 1
+    let lane = 0
+    while (lane < lanes.length && lanes[lane] > startCol) lane++
+    if (lane === lanes.length) lanes.push(0)
+    lanes[lane] = startCol + span
+    out.push({
+      stop: s,
+      startCol,
+      span,
+      lane,
+      cutLeft: sStart < weekStart,
+      cutRight: sEnd > weekEnd,
+    })
+  }
+  return out
 }
