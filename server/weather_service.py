@@ -34,7 +34,15 @@ class WeatherAPIError(Exception):
 
 
 def _get_cached(child_id: int, data_type: str, ttl: timedelta) -> Optional[dict]:
-    """Return cached payload if still within TTL, else None."""
+    """Return cached payload if still within TTL, else None.
+
+    Negative child_id is the trip-stop shim (see app.py `_StopShim`). Trip stops
+    aren't real ChildLocation rows, so we can't write a cache row keyed to them
+    without violating the FK on `WeatherCache.child_location_id`. Skip the cache
+    entirely for negative ids — trip stops always go straight to WeatherAPI.
+    """
+    if child_id < 0:
+        return None
     row = WeatherCache.query.filter_by(
         child_location_id=child_id, data_type=data_type
     ).first()
@@ -54,7 +62,14 @@ def _get_cached(child_id: int, data_type: str, ttl: timedelta) -> Optional[dict]
 
 
 def _store_cached(child_id: int, data_type: str, payload: dict) -> None:
-    """Upsert a cached payload."""
+    """Upsert a cached payload.
+
+    Negative child_id is the trip-stop shim — skip caching (see `_get_cached`
+    for the rationale). Postgres enforces the `WeatherCache.child_location_id`
+    FK, so inserting a negative id raises and aborts the whole request.
+    """
+    if child_id < 0:
+        return
     row = WeatherCache.query.filter_by(
         child_location_id=child_id, data_type=data_type
     ).first()
