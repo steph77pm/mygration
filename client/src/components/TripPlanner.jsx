@@ -198,7 +198,7 @@ function TrackSummary({ track }) {
         )}
         {summary?.worst_bug && <BugInd level={summary.worst_bug} />}
         {summary?.has_warnings && (
-          <span className="alert-tag severe" style={{ fontSize: 10 }}>
+          <span className="alert-tag severe" style={{ fontSize: 10 }} title="Has warnings">
             Has warnings
           </span>
         )}
@@ -382,7 +382,7 @@ function StopTimelineCard({
       {alertTags.length > 0 && (
         <div className="stop-alerts">
           {alertTags.map((t, i) => (
-            <span key={i} className={`alert-tag ${t.cls}`}>
+            <span key={i} className={`alert-tag ${t.cls}`} title={t.label}>
               {t.label}
             </span>
           ))}
@@ -505,7 +505,9 @@ function BugInd({ level }) {
  * Build alert-tag objects for a stop from its weather payload. Mirrors
  * alertTagsFor() in LocationCard.jsx but only surfaces the ones relevant at
  * the stop level (heat, cold, native). Skip the "Looking good" tag — too
- * noisy on the stop cards.
+ * noisy on the stop cards. De-duplicates native alerts by label so that a
+ * county that issues e.g. two "Beach Hazards Statement" notices only renders
+ * one chip.
  */
 function buildAlertTags(weather) {
   const out = []
@@ -517,9 +519,12 @@ function buildAlertTags(weather) {
   if (a.extended_cold) {
     out.push({ cls: 'cold', label: `❄️ Cold nights ${a.extended_cold_days}+ days` })
   }
+  const seen = new Set()
   for (const n of a.native || []) {
-    const label = n.event || n.headline || 'Weather alert'
-    out.push({ cls: 'severe', label: `⚠️ ${label}` })
+    const label = `⚠️ ${n.event || n.headline || 'Weather alert'}`
+    if (seen.has(label)) continue
+    seen.add(label)
+    out.push({ cls: 'severe', label })
   }
   return out
 }

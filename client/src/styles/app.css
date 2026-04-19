@@ -186,11 +186,21 @@ body {
   padding: 2px 8px;
   border-radius: 4px;
   margin: 2px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
-.alert-tag.heat { background: rgba(239,68,68,0.15); color: #f87171; }
+/* Palette intent:
+   - severe (hazards/advisories) owns red — this is the "act on this" signal
+   - heat moved to pink/magenta (was red-family, conflicted with severe)
+   - cold stays blue, bug stays purple, good stays green
+*/
+.alert-tag.heat { background: rgba(236,72,153,0.18); color: #f472b6; }
 .alert-tag.cold { background: rgba(96,165,250,0.15); color: #60a5fa; }
 .alert-tag.bug { background: rgba(168,85,247,0.15); color: #a78bfa; }
-.alert-tag.severe { background: rgba(251,191,36,0.15); color: #fbbf24; }
+.alert-tag.severe { background: rgba(239,68,68,0.2); color: #f87171; }
 .alert-tag.good { background: rgba(34,197,94,0.15); color: #4ade80; }
 
 .bug-ind {
@@ -199,11 +209,13 @@ body {
   gap: 4px;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .bug-ind.low { color: #4ade80; }
 .bug-ind.moderate { color: #fbbf24; }
 .bug-ind.high { color: #f97316; }
-.bug-ind.severe { color: #ef4444; }
+/* severe moved off red (red now belongs to hazards) — teal is unused elsewhere */
+.bug-ind.severe { color: #2dd4bf; }
 
 /* ---------- 5. Card grid + location card ---------- */
 
@@ -884,11 +896,19 @@ body {
   background: rgba(15, 23, 42, 0.5);
   border-radius: 8px;
   margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 .list-stop-row:hover { background: rgba(15, 23, 42, 0.8); }
 .list-stop-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.list-stop-info { flex: 1; min-width: 0; }
-.list-stop-name { font-size: 14px; font-weight: 600; color: #f1f5f9; }
+.list-stop-info { flex: 1 1 140px; min-width: 0; }
+.list-stop-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .list-stop-dates { font-size: 12px; color: #64748b; }
 .list-stop-weather {
   display: flex;
@@ -896,13 +916,15 @@ body {
   gap: 8px;
   font-size: 14px;
   color: #cbd5e1;
+  flex-shrink: 0;
 }
 .list-stop-flags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
-  min-width: 120px;
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 
 /* Track color picker for the New Track form. */
@@ -1058,6 +1080,11 @@ body {
   display: block;
   padding: 6px 10px;
   margin: 0;
+  /* detail view shows the full alert text — undo the chip truncation */
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .weekly-table {
