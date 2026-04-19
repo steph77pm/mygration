@@ -192,7 +192,7 @@ function LiveLocationCard({ child, parentName, onOpen, onKey, editDeleteButtons 
           <div>
             <span className="condition-text">{current.condition}</span>
             <span className="condition-detail">
-              💧 {Math.round(current.humidity)}%&nbsp;&nbsp;💨 {Math.round(current.wind_mph)} mph
+              💨 {Math.round(current.wind_mph)} mph
             </span>
           </div>
         </div>
@@ -202,7 +202,9 @@ function LiveLocationCard({ child, parentName, onOpen, onKey, editDeleteButtons 
         <div className="card-indicators">
           {bugRisk && <BugInd level={bugRisk} />}
           {humidityPct != null && (
-            <span className={`humidity-label ${humClass}`}>💧 {humLabel}</span>
+            <span className={`humidity-label ${humClass}`}>
+              HUM {Math.round(humidityPct)}% ({humLabel})
+            </span>
           )}
         </div>
       )}
@@ -221,7 +223,7 @@ function LiveLocationCard({ child, parentName, onOpen, onKey, editDeleteButtons 
         <div className="card-weekly-mini">
           {forecast.slice(0, 5).map((d, i) => (
             <div className="mini-day" key={d.date || i}>
-              <span className="mini-label">{shortDay(d.date)}</span>
+              <span className="mini-label">{shortDay(d.date, i)}</span>
               <span className="mini-high">{Math.round(d.high_f)}°</span>
               <span className="mini-low">{Math.round(d.low_f)}°</span>
               {d.rain_chance_pct >= 40 && <span className="mini-rain">🌧</span>}
@@ -281,10 +283,17 @@ export function alertTagsFor(alerts, comfortScore) {
   return out
 }
 
-/** "2026-04-19" → "Sun". Falls back to a short form of any non-ISO string. */
-function shortDay(date) {
+/**
+ * "2026-04-19" → "Sun". Index 0 (today) becomes "Today" instead.
+ *
+ * Parses the ISO string as local time ("T00:00:00"), not UTC. Otherwise
+ * users in western time zones see every day shifted back by one (the
+ * forecast day for 2026-04-18 renders as "Fri" in EDT).
+ */
+function shortDay(date, idx) {
+  if (idx === 0) return 'Today'
   if (!date) return ''
-  const d = typeof date === 'string' ? new Date(date) : date
+  const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : date
   if (Number.isNaN(d?.getTime?.())) return String(date).slice(0, 3)
   return d.toLocaleDateString(undefined, { weekday: 'short' })
 }
